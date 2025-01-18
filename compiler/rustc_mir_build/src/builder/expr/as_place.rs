@@ -724,25 +724,25 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr_span: Span,
         source_info: SourceInfo,
     ) -> BasicBlock {
-        let slice = slice.to_place(self);
+        let usize_ty = self.tcx.types.usize;
+        let bool_ty = self.tcx.types.bool;
+        // bounds check:
+        let len = self.temp(usize_ty, expr_span);
+        let lt = self.temp(bool_ty, expr_span);
 
         // len = len(slice)
-        let len = self.len_of_slice_or_array(block, slice, expr_span, source_info);
-
+        self.cfg.push_assign(block, source_info, len, Rvalue::Len(slice.to_place(self)));
         // lt = idx < len
-        let bool_ty = self.tcx.types.bool;
-        let lt = self.temp(bool_ty, expr_span);
         self.cfg.push_assign(
             block,
             source_info,
             lt,
             Rvalue::BinaryOp(
                 BinOp::Lt,
-                Box::new((Operand::Copy(Place::from(index)), len.to_copy())),
+                Box::new((Operand::Copy(Place::from(index)), Operand::Copy(len))),
             ),
         );
-        let msg = BoundsCheck { len, index: Operand::Copy(Place::from(index)) };
-
+        let msg = BoundsCheck { len: Operand::Move(len), index: Operand::Copy(Place::from(index)) };
         // assert!(lt, "...")
         self.assert(block, Operand::Move(lt), true, msg, expr_span)
     }

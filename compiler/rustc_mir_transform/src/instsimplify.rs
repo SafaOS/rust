@@ -152,6 +152,18 @@ impl<'tcx> InstSimplifyContext<'_, 'tcx> {
         }
     }
 
+    /// Transform `Len([_; N])` ==> `N`.
+    fn simplify_len(&self, rvalue: &mut Rvalue<'tcx>) {
+        if let Rvalue::Len(ref place) = *rvalue {
+            let place_ty = place.ty(self.local_decls, self.tcx).ty;
+            if let ty::Array(_, len) = *place_ty.kind() {
+                let const_ = Const::from_ty_const(len, self.tcx.types.usize, self.tcx);
+                let constant = ConstOperand { span: DUMMY_SP, const_, user_ty: None };
+                *rvalue = Rvalue::Use(Operand::Constant(Box::new(constant)));
+            }
+        }
+    }
+
     /// Transform `Aggregate(RawPtr, [p, ()])` ==> `Cast(PtrToPtr, p)`.
     fn simplify_ptr_aggregate(&self, rvalue: &mut Rvalue<'tcx>) {
         if let Rvalue::Aggregate(box AggregateKind::RawPtr(pointee_ty, mutability), fields) = rvalue
