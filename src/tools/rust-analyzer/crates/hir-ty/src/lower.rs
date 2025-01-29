@@ -16,19 +16,16 @@ use std::{
 
 use base_db::Crate;
 use chalk_ir::{
-    Mutability, Safety, TypeOutlives,
     cast::Cast,
     fold::{Shift, TypeFoldable},
     interner::HasInterner,
+    Mutability, Safety, TypeOutlives,
 };
 
 use either::Either;
 use hir_def::{
-    AdtId, AssocItemId, CallableDefId, ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId,
-    FunctionId, GenericDefId, GenericParamId, HasModule, ImplId, ItemContainerId, LocalFieldId,
-    Lookup, StaticId, StructId, TypeAliasId, TypeOrConstParamId, UnionId, VariantId,
     builtin_type::BuiltinType,
-    expr_store::{ExpressionStore, path::Path},
+    expr_store::{path::Path, ExpressionStore},
     hir::generics::{GenericParamDataRef, TypeOrConstParamData, WherePredicate},
     item_tree::FieldsShape,
     lang_item::LangItem,
@@ -38,6 +35,9 @@ use hir_def::{
         ConstRef, LifetimeRefId, LiteralConstRef, PathId, TraitBoundModifier,
         TraitRef as HirTraitRef, TypeBound, TypeRef, TypeRefId,
     },
+    AdtId, AssocItemId, CallableDefId, ConstId, ConstParamId, DefWithBodyId, EnumId, EnumVariantId,
+    FunctionId, GenericDefId, GenericParamId, HasModule, ImplId, ItemContainerId, LocalFieldId,
+    Lookup, StaticId, StructId, TypeAliasId, TypeOrConstParamId, UnionId, VariantId,
 };
 use hir_expand::name::Name;
 use la_arena::{Arena, ArenaMap};
@@ -47,24 +47,24 @@ use stdx::{impl_from, never};
 use triomphe::{Arc, ThinArc};
 
 use crate::{
-    AliasTy, Binders, BoundVar, CallableSig, Const, DebruijnIndex, DynTy, FnAbi, FnPointer, FnSig,
-    FnSubst, ImplTrait, ImplTraitId, ImplTraits, Interner, Lifetime, LifetimeData,
-    LifetimeOutlives, PolyFnSig, ProgramClause, QuantifiedWhereClause, QuantifiedWhereClauses,
-    Substitution, TraitEnvironment, TraitRef, TraitRefExt, Ty, TyBuilder, TyKind, WhereClause,
     all_super_traits,
     consteval::{intern_const_ref, path_to_const, unknown_const, unknown_const_as_generic},
     db::HirDatabase,
     error_lifetime,
-    generics::{Generics, generics, trait_self_param_idx},
+    generics::{generics, trait_self_param_idx, Generics},
     lower::{
         diagnostics::*,
         path::{PathDiagnosticCallback, PathLoweringContext},
     },
     make_binders,
-    mapping::{ToChalk, from_chalk_trait_id, lt_to_placeholder_idx},
+    mapping::{from_chalk_trait_id, lt_to_placeholder_idx, ToChalk},
     static_lifetime, to_chalk_trait_id, to_placeholder_idx,
     utils::all_super_trait_refs,
-    variable_kinds_from_iter,
+    variable_kinds_from_iter, AliasTy, Binders, BoundVar, CallableSig, Const, DebruijnIndex, DynTy,
+    FnAbi, FnPointer, FnSig, FnSubst, ImplTrait, ImplTraitId, ImplTraits, Interner, Lifetime,
+    LifetimeData, LifetimeOutlives, PolyFnSig, ProgramClause, QuantifiedWhereClause,
+    QuantifiedWhereClauses, Substitution, TraitEnvironment, TraitRef, TraitRefExt, Ty, TyBuilder,
+    TyKind, WhereClause,
 };
 
 #[derive(Debug, Default)]
@@ -1193,7 +1193,11 @@ fn implicitly_sized_clauses<'a, 'subst: 'a>(
             .enumerate()
             .filter_map(
                 move |(idx, generic_arg)| {
-                    if Some(idx) == trait_self_idx { None } else { Some(generic_arg) }
+                    if Some(idx) == trait_self_idx {
+                        None
+                    } else {
+                        Some(generic_arg)
+                    }
                 },
             )
             .filter_map(|generic_arg| generic_arg.ty(Interner))
