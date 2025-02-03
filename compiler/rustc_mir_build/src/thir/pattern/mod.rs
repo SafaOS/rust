@@ -45,7 +45,7 @@ pub(super) fn pat_from_hir<'a, 'tcx>(
     typeck_results: &'a ty::TypeckResults<'tcx>,
     pat: &'tcx hir::Pat<'tcx>,
 ) -> Box<Pat<'tcx>> {
-    let migration_labels = typeck_results.rust_2024_migration_desugared_pats().get(pat.hir_id);
+    let migration_info = typeck_results.rust_2024_migration_desugared_pats().get(pat.hir_id);
     let mut pcx = PatCtxt {
         tcx,
         typing_env,
