@@ -3114,6 +3114,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // a hard error if the subpattern is of edition >= 2024. We set it manually to be sure:
             trimmed.with_ctxt(subpat.span.ctxt())
         };
+        info.span_labels.push((trimmed_span, primary_label.to_owned()));
 
         let mut typeck_results = self.typeck_results.borrow_mut();
         let mut table = typeck_results.rust_2024_migration_desugared_pats_mut();
