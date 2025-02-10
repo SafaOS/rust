@@ -218,6 +218,11 @@ jobs:
           cd src/ci/citool
           CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=../../../build/citool cargo build
 
+      # Show the environment just before we run the build
+      # This makes it easier to diagnose problems with the above install scripts.
+      - name: show the current environment
+        run: src/ci/scripts/dump-environment.sh
+
       - name: run the build
         run: |
           set +e
