@@ -2,9 +2,9 @@ name: "Build SafaOS's toolchain"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "1.84.1" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "1.84.1" ]
 
 env:
   CARGO_TERM_COLOR: always
