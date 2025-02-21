@@ -597,6 +597,9 @@
 //@ revisions: x86_64_unknown_none
 //@ [x86_64_unknown_none] compile-flags: --target x86_64-unknown-none
 //@ [x86_64_unknown_none] needs-llvm-components: x86
+//@ revisions: x86_64_unknown_safaos
+//@ [x86_64_unknown_safaos] compile-flags: --target x86_64-unknown-safaos
+//@ [x86_64_unknown_safaos] needs-llvm-components: x86
 //@ revisions: x86_64_unknown_openbsd
 //@ [x86_64_unknown_openbsd] compile-flags: --target x86_64-unknown-openbsd
 //@ [x86_64_unknown_openbsd] needs-llvm-components: x86

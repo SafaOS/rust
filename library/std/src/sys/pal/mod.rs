@@ -49,6 +49,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_os = "xous")] {
         mod xous;
         pub use self::xous::*;
+    } else if #[cfg(target_os = "safaos")] {
+        mod safaos;
+        pub use self::safaos::*;
     } else if #[cfg(target_os = "uefi")] {
         mod uefi;
         pub use self::uefi::*;
