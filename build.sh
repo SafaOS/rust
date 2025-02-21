@@ -20,3 +20,5 @@ cargo build --target x86_64-unknown-safaos -Zbinary-dep-depinfo \
 
 rm "$TARGET_DIR_LIB/*.rlib"
 cp library/target/x86_64-unknown-safaos/release/deps/*.rlib $TARGET_DIR_LIB
+rm -rf x86_64-unknown-safaos-toolchain
+cp -r $TARGET_DIR x86_64-unknown-safaos-toolchain
