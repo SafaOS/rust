@@ -19,7 +19,7 @@ cargo build --target x86_64-unknown-safaos -Zbinary-dep-depinfo \
           --features "panic-unwind compiler-builtins-c compiler-builtins-mem" \
           --manifest-path "library/std/Cargo.toml"
 
-rm $TARGET_DIR_LIB/*.rlib
+rm -f $TARGET_DIR_LIB/*.rlib
 cp library/target/x86_64-unknown-safaos/release/deps/*.rlib $TARGET_DIR_LIB
 cp library/target/x86_64-unknown-safaos/release/*.rlib $TARGET_DIR_LIB
 rm -rf x86_64-unknown-safaos-toolchain
