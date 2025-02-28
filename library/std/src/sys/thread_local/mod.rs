@@ -28,6 +28,7 @@ cfg_if::cfg_if! {
         all(target_family = "wasm", not(target_feature = "atomics")),
         target_os = "uefi",
         target_os = "zkvm",
+        target_os = "safaos",
     ))] {
         mod statik;
         pub use statik::{EagerStorage, LazyStorage, thread_local_inner};
@@ -108,6 +109,7 @@ pub(crate) mod guard {
         } else if #[cfg(any(
             target_os = "hermit",
             target_os = "xous",
+            target_os = "safaos",
         ))] {
             // `std` is the only runtime, so it just calls the destructor functions
             // itself when the time comes.
