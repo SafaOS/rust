@@ -2014,6 +2014,8 @@ supported_targets! {
     ("riscv32-wrs-vxworks", riscv32_wrs_vxworks),
     ("riscv64-wrs-vxworks", riscv64_wrs_vxworks),
 
+    ("x86_64-unknown-safaos", x86_64_unknown_safaos),
+
     ("aarch64-kmc-solid_asp3", aarch64_kmc_solid_asp3),
     ("armv7a-kmc-solid_asp3-eabi", armv7a_kmc_solid_asp3_eabi),
     ("armv7a-kmc-solid_asp3-eabihf", armv7a_kmc_solid_asp3_eabihf),
