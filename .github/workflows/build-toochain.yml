@@ -1,23 +1,17 @@
 name: "Build SafaOS's toolchain"
 
-on:
-  push:
-    branches: [ "stable" ]
-  pull_request:
-    branches: [ "stable" ]
-
+on: [push]
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: init
-      run: ./init.sh
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
     - name: build
       run: ./build.sh
     - name: Upload a Build Artifact
@@ -27,4 +21,10 @@ jobs:
         name: x86_64-unknown-safaos
         # A file, directory or wildcard pattern that describes what to upload
         path: x86_64-unknown-safaos-toolchain
-
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      # Release only if it's a tag
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          x86_64-unknown-safaos-toolchain
