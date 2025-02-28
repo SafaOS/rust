@@ -31,4 +31,3 @@ jobs:
       with:
         files: |
           toolchain.tar
-        token: ${{ secrets.GITHUB_TOKEN }}
