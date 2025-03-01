@@ -17,10 +17,9 @@ export RUST_COMPILER_RT_ROOT="$(pwd)/src/llvm-project/compiler-rt"
 cargo build --target x86_64-unknown-safaos -Zbinary-dep-depinfo \
           --release \
           --features "panic-unwind compiler-builtins-c compiler-builtins-mem" \
-          --manifest-path "library/std/Cargo.toml"
+          --manifest-path "library/sysroot/Cargo.toml"
 
 rm -f $TARGET_DIR_LIB/*.rlib
 cp library/target/x86_64-unknown-safaos/release/deps/*.rlib $TARGET_DIR_LIB
-cp library/target/x86_64-unknown-safaos/release/*.rlib $TARGET_DIR_LIB
 rm -rf x86_64-unknown-safaos-toolchain
 cp -r $TARGET_DIR x86_64-unknown-safaos-toolchain
