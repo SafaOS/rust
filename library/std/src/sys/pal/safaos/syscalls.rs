@@ -55,7 +55,21 @@ fn syscall1(num: usize, arg1: usize) -> ErrorStatus {
 
         crate::mem::transmute(result)
     }
+}
 
+fn syscall2(num: usize, arg1: usize, arg2: usize) -> ErrorStatus {
+    let result: u16;
+    unsafe {
+        asm!(
+            "int 0x80",
+            in("rax") num,
+            in("rdi") arg1,
+            in("rsi") arg2,
+            lateout("rax") result,
+        );
+
+        crate::mem::transmute(result)
+    }
 }
 
 fn syscall5(
@@ -97,7 +111,9 @@ pub fn syssync(fd: usize) -> ErrorStatus {
     syscall1(0x10, fd)
 }
 
-
 pub fn syssbrk(size: isize) -> Result<*mut u8, ErrorStatus> {
-    todo!()
+    let mut target_ptr: *mut u8 = core::ptr::null_mut();
+    let err = syscall2(0x12, size as usize, (&mut target_ptr) as *mut _ as usize);
+
+    if err != ErrorStatus::None { Err(err) } else { Ok(target_ptr) }
 }
