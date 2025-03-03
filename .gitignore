@@ -105,4 +105,3 @@ flake.lock
 
 # SafaOS specific
 x86_64-unknown-safaos*
-target.json
