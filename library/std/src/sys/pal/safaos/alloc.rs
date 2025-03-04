@@ -22,7 +22,7 @@ impl Block {
         assert!(size <= isize::MAX as usize);
 
         let ptr = get_data_break() as *mut Block;
-        syscalls::syssbrk(size as isize).ok()?;
+        syscalls::sbrk(size as isize).ok()?;
         unsafe {
             *ptr = Self { free: true, data_len: size - size_of::<Block>(), ..Default::default() };
             Some(&mut *ptr)
@@ -50,7 +50,8 @@ struct SystemAllocator {
 }
 
 fn get_data_break() -> *mut u8 {
-    syscalls::syssbrk(0).unwrap()
+    // Should never fail
+    unsafe { syscalls::sbrk(0).unwrap_unchecked() }
 }
 
 impl SystemAllocator {
@@ -71,6 +72,7 @@ impl SystemAllocator {
         None
     }
 
+    #[inline]
     pub fn allocate(&mut self, size: usize) -> Option<NonNull<[u8]>> {
         if let Some(block) = self.find_block(size) {
             unsafe {
@@ -91,6 +93,7 @@ impl SystemAllocator {
         }
     }
 
+    #[inline]
     pub fn deallocate(&mut self, block_data: NonNull<u8>) {
         unsafe {
             let block_ptr = Block::block_from_data_ptr(block_data);
@@ -101,10 +104,11 @@ impl SystemAllocator {
 
 #[unstable(feature = "allocator_api", issue = "32838")]
 unsafe impl Allocator for Mutex<SystemAllocator> {
+    #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, core::alloc::AllocError> {
         self.lock().unwrap().allocate(layout.size()).ok_or(core::alloc::AllocError)
     }
-
+    #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, _: Layout) {
         self.lock().unwrap().deallocate(ptr)
     }
@@ -114,13 +118,14 @@ static GLOBAL_SYSTEM_ALLOCATOR: Mutex<SystemAllocator> = Mutex::new(SystemAlloca
 
 #[stable(feature = "alloc_system_type", since = "1.28.0")]
 unsafe impl GlobalAlloc for System {
+    #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match GLOBAL_SYSTEM_ALLOCATOR.allocate(layout) {
             Ok(data) => data.as_ptr() as *mut u8,
             Err(core::alloc::AllocError) => ptr::null_mut(),
         }
     }
-
+    #[inline]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe { GLOBAL_SYSTEM_ALLOCATOR.deallocate(NonNull::new_unchecked(ptr), layout) }
     }
