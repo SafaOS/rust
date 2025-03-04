@@ -1,3 +1,5 @@
+use super::syscalls;
+use super::syscalls::ErrorStatus;
 use crate::io as std_io;
 
 // SAFETY: must be called only once during runtime initialization.
@@ -20,10 +22,15 @@ pub fn is_interrupted(_code: i32) -> bool {
     false
 }
 
-pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
-    crate::io::ErrorKind::Uncategorized
+pub fn decode_error_kind(code: i32) -> crate::io::ErrorKind {
+    if code > u16::MAX as i32 {
+        crate::io::ErrorKind::Uncategorized
+    } else {
+        let status = ErrorStatus::try_from(code as u16).unwrap_or(ErrorStatus::Last);
+        status.into_io_error_kind()
+    }
 }
 
 pub fn abort_internal() -> ! {
-    core::intrinsics::abort();
+    syscalls::exit(1)
 }
