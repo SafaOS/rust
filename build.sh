@@ -16,7 +16,7 @@ export RUST_COMPILER_RT_ROOT="$(pwd)/src/llvm-project/compiler-rt"
 
 cargo build --target x86_64-unknown-safaos -Zbinary-dep-depinfo \
           --release \
-          --features "panic-unwind compiler-builtins-c compiler-builtins-mem" \
+          --features "compiler-builtins-c compiler-builtins-mem" \
           --manifest-path "library/sysroot/Cargo.toml"
 
 rm -f $TARGET_DIR_LIB/*.rlib
