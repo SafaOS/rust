@@ -1,17 +1,27 @@
-use super::unsupported;
+use super::syscalls::ErrorStatus;
+use super::{syscalls, unsupported};
 use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
 use crate::marker::PhantomData;
 use crate::path::{self, PathBuf};
 use crate::{fmt, io};
-use core::arch::asm;
 
 pub fn errno() -> i32 {
     0
 }
 
-pub fn error_string(_errno: i32) -> String {
-    "operation successful".to_string()
+pub fn error_string(errno: i32) -> String {
+    if errno == 0 {
+        return "operation successful".to_string();
+    }
+
+    if errno <= u16::MAX as i32 {
+        if let Ok(err) = ErrorStatus::try_from(errno as u16) {
+            return err.as_str().to_string();
+        }
+    }
+
+    "operation failed".to_string()
 }
 
 pub fn getcwd() -> io::Result<PathBuf> {
@@ -112,18 +122,19 @@ pub fn home_dir() -> Option<PathBuf> {
     None
 }
 
-fn sysexit(code: usize) -> ! {
-    unsafe {
-        asm!(
-            "xor rax, rax",
-            "int 0x80",
-            in("rdi") code,
-            options(noreturn),
-        );
-    }
-}
 pub fn exit(code: i32) -> ! {
-    sysexit(code as usize)
+    syscalls::exit(code as usize)
+}
+
+#[no_mangle]
+pub extern "C" fn abort() -> ! {
+    exit(1)
+}
+
+// TODO: define an ErrorStatus for panics? or just go with Generic?
+#[no_mangle]
+pub extern "C" fn __rust_abort() -> ! {
+    exit(1)
 }
 
 pub fn getpid() -> u32 {
