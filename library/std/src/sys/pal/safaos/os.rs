@@ -25,7 +25,10 @@ pub fn error_string(errno: i32) -> String {
 }
 
 pub fn getcwd() -> io::Result<PathBuf> {
-    unsupported()
+    let cwd = syscalls::getcwd()?;
+    let path = unsafe { OsString::from_encoded_bytes_unchecked(cwd) };
+    let path = PathBuf::from(path);
+    Ok(path)
 }
 
 pub fn chdir(_: &path::Path) -> io::Result<()> {

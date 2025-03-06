@@ -149,6 +149,23 @@ fn syscall2(num: usize, arg1: usize, arg2: usize) -> Result<SysSuccess, ErrorSta
 }
 
 #[inline(always)]
+fn syscall3(num: usize, arg1: usize, arg2: usize, arg3: usize) -> Result<SysSuccess, ErrorStatus> {
+    let result: u16;
+    unsafe {
+        asm!(
+            "int 0x80",
+            in("rax") num,
+            in("rdi") arg1,
+            in("rsi") arg2,
+            in("rdx") arg3,
+            lateout("rax") result,
+        );
+
+        ErrorStatus::from_u16(result)
+    }
+}
+
+#[inline(always)]
 fn syscall5(
     num: usize,
     arg1: usize,
@@ -232,4 +249,39 @@ pub fn sbrk(size: isize) -> Result<*mut u8, ErrorStatus> {
 pub fn exit(code: usize) -> ! {
     let _ = syscall1(0, code);
     unreachable!()
+}
+
+/// Gets the current working directory
+/// returns Err(ErrorStatus::Generic) if the buffer is too small to hold the cwd
+#[inline(always)]
+fn sysgetcwd(cwd_buf: &mut [u8], dest_len: &mut usize) -> Result<SysSuccess, ErrorStatus> {
+    syscall3(0xF, cwd_buf.as_mut_ptr() as usize, cwd_buf.len(), dest_len as *mut _ as usize)
+}
+
+#[inline]
+pub fn getcwd() -> Result<Vec<u8>, ErrorStatus> {
+    let extend = |cwd_buf: &mut Vec<u8>| unsafe {
+        cwd_buf.reserve(128);
+        cwd_buf.set_len(cwd_buf.capacity());
+    };
+
+    let mut dest_len = 0;
+    let mut cwd_buf = Vec::new();
+    extend(&mut cwd_buf);
+
+    loop {
+        match sysgetcwd(&mut cwd_buf, &mut dest_len) {
+            Ok(SysSuccess) => unsafe {
+                cwd_buf.set_len(dest_len);
+                return Ok(cwd_buf);
+            },
+            Err(err) => {
+                if err == ErrorStatus::Generic {
+                    extend(&mut cwd_buf);
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+    }
 }
