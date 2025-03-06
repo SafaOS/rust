@@ -1,9 +1,10 @@
 use super::syscalls;
 use crate::io;
+use crate::os::safaos::errors::ErrorStatus;
 
 #[stable(feature = "stdio", since = "1.0.0")]
-impl From<syscalls::ErrorStatus> for io::Error {
-    fn from(err: syscalls::ErrorStatus) -> io::Error {
+impl From<ErrorStatus> for io::Error {
+    fn from(err: ErrorStatus) -> io::Error {
         let kind = err.into_io_error_kind();
         let error = err.as_str();
 

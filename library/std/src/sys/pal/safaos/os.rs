@@ -1,8 +1,8 @@
-use super::syscalls::ErrorStatus;
 use super::{syscalls, unsupported};
 use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
 use crate::marker::PhantomData;
+use crate::os::safaos::errors::ErrorStatus;
 use crate::path::{self, PathBuf};
 use crate::{fmt, io};
 
