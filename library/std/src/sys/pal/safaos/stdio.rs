@@ -66,7 +66,7 @@ impl io::Write for Stderr {
     }
 }
 
-pub const STDIN_BUF_SIZE: usize = 1024;
+pub const STDIN_BUF_SIZE: usize = 128;
 
 pub fn is_ebadf(_err: &io::Error) -> bool {
     true
