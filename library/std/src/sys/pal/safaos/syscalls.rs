@@ -1,5 +1,6 @@
 use crate::arch::asm;
 use crate::os::safaos::errors::{ErrorStatus, SysSuccess};
+use crate::path::Path;
 use core::{ops, ptr};
 
 /// Keep in sync with the kernel implementition
@@ -210,6 +211,17 @@ pub fn sbrk(size: isize) -> Result<*mut u8, ErrorStatus> {
 pub fn exit(code: usize) -> ! {
     let _ = syscall1(SyscallNum::SysExit, code);
     unreachable!()
+}
+
+#[inline(always)]
+fn syschdir(buf: &[u8]) -> Result<SysSuccess, ErrorStatus> {
+    syscall2(SyscallNum::SysCHDir, buf.as_ptr() as usize, buf.len())
+}
+
+#[inline]
+pub fn chdir(path: &Path) -> Result<(), ErrorStatus> {
+    let path = path.as_os_str().as_encoded_bytes();
+    syschdir(path).map(|SysSuccess| ())
 }
 
 /// Gets the current working directory
