@@ -31,8 +31,9 @@ pub fn getcwd() -> io::Result<PathBuf> {
     Ok(path)
 }
 
-pub fn chdir(_: &path::Path) -> io::Result<()> {
-    unsupported()
+pub fn chdir(path: &path::Path) -> io::Result<()> {
+    syscalls::chdir(path)?;
+    Ok(())
 }
 
 pub struct SplitPaths<'a>(!, PhantomData<&'a ()>);
