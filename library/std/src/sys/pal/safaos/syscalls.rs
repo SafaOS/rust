@@ -181,7 +181,7 @@ fn syswrite(
     len: usize,
     dest_wrote: &mut usize,
 ) -> Result<SysSuccess, ErrorStatus> {
-    syscall5(0x03, fd, offset as usize, buf as usize, len, dest_wrote as *const _ as usize)
+    syscall5(0x03, fd, offset as usize, buf as usize, len, dest_wrote as *mut _ as usize)
 }
 
 #[inline]
@@ -198,7 +198,7 @@ fn sysread(
     len: usize,
     dest_read: &mut usize,
 ) -> Result<SysSuccess, ErrorStatus> {
-    syscall5(0x04, fd, offset as usize, buf as usize, len, dest_read as *const _ as usize)
+    syscall5(0x04, fd, offset as usize, buf as usize, len, dest_read as *mut _ as usize)
 }
 
 #[inline]
