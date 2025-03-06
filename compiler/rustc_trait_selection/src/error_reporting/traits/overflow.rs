@@ -184,6 +184,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             suggest_increasing_limit,
         );
         self.note_obligation_cause(&mut err, &obligation);
+        self.point_at_returns_when_relevant(&mut err, &obligation);
         err.emit()
     }
 }

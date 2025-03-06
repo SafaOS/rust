@@ -1237,7 +1237,7 @@ fn check_type_defn<'tcx>(
                     ),
                     wfcx.param_env,
                     ty,
-                    tcx.require_lang_item(LangItem::Sized, Some(hir_ty.span)),
+                    tcx.require_lang_item(LangItem::Sized, None),
                 );
             }
 
@@ -1362,7 +1362,7 @@ fn check_item_type(
                 ),
                 wfcx.param_env,
                 item_ty,
-                tcx.require_lang_item(LangItem::Sized, Some(ty_span)),
+                tcx.require_lang_item(LangItem::Sized, None),
             );
         }
 
