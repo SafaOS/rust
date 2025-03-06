@@ -3,6 +3,7 @@ use crate::ffi::{OsStr, OsString};
 use crate::num::NonZero;
 use crate::path::Path;
 use crate::sys::fs::File;
+use crate::sys::pal::safaos::syscalls::{self, ErrorStatus};
 use crate::sys::pipe::AnonPipe;
 use crate::sys::unsupported;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
@@ -29,6 +30,11 @@ pub struct StdioPipes {
     pub stdin: Option<AnonPipe>,
     pub stdout: Option<AnonPipe>,
     pub stderr: Option<AnonPipe>,
+}
+impl StdioPipes {
+    pub fn new() -> Self {
+        Self { stdin: None, stdout: None, stderr: None }
+    }
 }
 
 #[derive(Debug)]
@@ -99,10 +105,32 @@ impl Command {
 
     pub fn spawn(
         &mut self,
-        _default: Stdio,
+        default: Stdio,
         _needs_stdin: bool,
     ) -> io::Result<(Process, StdioPipes)> {
-        unsupported()
+        assert!(
+            self.stdin.is_none()
+                && self.stdout.is_none()
+                && self.stderr.is_none()
+                && self.cwd.is_none()
+                && self.env.is_unchanged()
+                && matches!(default, Stdio::Inherit),
+            "Spawning a process with custom stdio, env or cwd is not supported for SafaOS"
+        );
+
+        let name = unsafe { self.program.to_str().unwrap_unchecked() };
+        let argv =
+            self.args.iter().map(|s| unsafe { s.to_str().unwrap_unchecked() }).collect::<Vec<_>>();
+        let path = name;
+
+        let pid = syscalls::pspawn(
+            Some(name),
+            path,
+            &argv,
+            syscalls::SpawnFlags::CLONE_RESOURCES | syscalls::SpawnFlags::CLONE_CWD,
+        )?;
+
+        Ok((Process(pid), StdioPipes::new()))
     }
 
     pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
@@ -200,57 +228,55 @@ impl fmt::Debug for Command {
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
 #[non_exhaustive]
-pub struct ExitStatus();
+pub struct ExitStatus(u32);
 
 impl ExitStatus {
     pub fn exit_ok(&self) -> Result<(), ExitStatusError> {
-        Ok(())
+        if self.0 == 0 {
+            Ok(())
+        } else {
+            let error_status = ErrorStatus::try_from(self.0 as i32);
+            match error_status {
+                Ok(err) => Err(ExitStatusError::ErrorStatus(err)),
+                Err(()) => Err(ExitStatusError::Unknown(self.0)),
+            }
+        }
     }
 
     pub fn code(&self) -> Option<i32> {
-        Some(0)
+        Some(self.0 as i32)
     }
 }
 
 impl fmt::Display for ExitStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<dummy exit status>")
+        let error_status = ErrorStatus::try_from(self.0 as i32);
+        match error_status {
+            Ok(err) => write!(f, "{}", err.as_str()),
+            Err(_) => write!(f, "<unknown exit status {}>", self.0),
+        }
     }
 }
 
-pub struct ExitStatusError(!);
-
-impl Clone for ExitStatusError {
-    fn clone(&self) -> ExitStatusError {
-        self.0
-    }
-}
-
-impl Copy for ExitStatusError {}
-
-impl PartialEq for ExitStatusError {
-    fn eq(&self, _other: &ExitStatusError) -> bool {
-        self.0
-    }
-}
-
-impl Eq for ExitStatusError {}
-
-impl fmt::Debug for ExitStatusError {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitStatusError {
+    ErrorStatus(ErrorStatus),
+    Unknown(u32),
 }
 
 impl Into<ExitStatus> for ExitStatusError {
     fn into(self) -> ExitStatus {
-        self.0
+        match self {
+            Self::ErrorStatus(err) => ExitStatus(err as u32),
+            Self::Unknown(code) => ExitStatus(code),
+        }
     }
 }
 
 impl ExitStatusError {
     pub fn code(self) -> Option<NonZero<i32>> {
-        self.0
+        let i32 = Into::<ExitStatus>::into(self).code()?;
+        NonZero::new(i32)
     }
 }
 
@@ -272,23 +298,24 @@ impl From<u8> for ExitCode {
     }
 }
 
-pub struct Process(!);
+pub struct Process(usize);
 
 impl Process {
     pub fn id(&self) -> u32 {
-        self.0
+        self.0 as u32
     }
 
     pub fn kill(&mut self) -> io::Result<()> {
-        self.0
+        todo!("pkill is not yet implemented")
     }
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
-        self.0
+        let exit_code = syscalls::wait(self.0)?;
+        Ok(ExitStatus(exit_code as u32))
     }
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        self.0
+        todo!("try_wait is not yet implemented for SafaOS, use wait instead")
     }
 }
 
