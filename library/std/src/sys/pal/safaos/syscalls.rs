@@ -1,4 +1,38 @@
+use core::{ops, ptr};
+
 use crate::arch::asm;
+
+/// Keep in sync with the kernel implementition
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+enum SyscallNum {
+    SysExit = 0,
+    SysYield = 1,
+
+    SysOpen = 2,
+    SysDirIterOpen = 8,
+    SysClose = 5,
+    SysDirIterClose = 9,
+    SysDirIterNext = 10,
+    SysWrite = 3,
+    SysRead = 4,
+    SysCreate = 6,
+    SysCreateDir = 7,
+    SysSync = 16,
+    SysTruncate = 17,
+    SysCtl = 12,
+    SysFSize = 22,
+
+    SysCHDir = 14,
+    SysGetCWD = 15,
+    SysSbrk = 18,
+
+    SysPSpawn = 19,
+    SysWait = 11,
+
+    SysShutdown = 20,
+    SysReboot = 21,
+}
 
 #[stable(feature = "syscalls", since = "1.0.0")]
 // Keep in sync with the kernel implementition
@@ -118,12 +152,12 @@ impl ErrorStatus {
 }
 
 #[inline(always)]
-fn syscall1(num: usize, arg1: usize) -> Result<SysSuccess, ErrorStatus> {
+fn syscall1(num: SyscallNum, arg1: usize) -> Result<SysSuccess, ErrorStatus> {
     let result: u16;
     unsafe {
         asm!(
             "int 0x80",
-            in("rax") num,
+            in("rax") num as usize,
             in("rdi") arg1,
             lateout("rax") result,
         );
@@ -133,12 +167,12 @@ fn syscall1(num: usize, arg1: usize) -> Result<SysSuccess, ErrorStatus> {
 }
 
 #[inline(always)]
-fn syscall2(num: usize, arg1: usize, arg2: usize) -> Result<SysSuccess, ErrorStatus> {
+fn syscall2(num: SyscallNum, arg1: usize, arg2: usize) -> Result<SysSuccess, ErrorStatus> {
     let result: u16;
     unsafe {
         asm!(
             "int 0x80",
-            in("rax") num,
+            in("rax") num as usize,
             in("rdi") arg1,
             in("rsi") arg2,
             lateout("rax") result,
@@ -149,12 +183,17 @@ fn syscall2(num: usize, arg1: usize, arg2: usize) -> Result<SysSuccess, ErrorSta
 }
 
 #[inline(always)]
-fn syscall3(num: usize, arg1: usize, arg2: usize, arg3: usize) -> Result<SysSuccess, ErrorStatus> {
+fn syscall3(
+    num: SyscallNum,
+    arg1: usize,
+    arg2: usize,
+    arg3: usize,
+) -> Result<SysSuccess, ErrorStatus> {
     let result: u16;
     unsafe {
         asm!(
             "int 0x80",
-            in("rax") num,
+            in("rax") num as usize,
             in("rdi") arg1,
             in("rsi") arg2,
             in("rdx") arg3,
@@ -167,7 +206,7 @@ fn syscall3(num: usize, arg1: usize, arg2: usize, arg3: usize) -> Result<SysSucc
 
 #[inline(always)]
 fn syscall5(
-    num: usize,
+    num: SyscallNum,
     arg1: usize,
     arg2: usize,
     arg3: usize,
@@ -178,12 +217,36 @@ fn syscall5(
     unsafe {
         asm!(
             "int 0x80",
-            in("rax") num,
+            in("rax") num as usize,
             in("rdi") arg1,
             in("rsi") arg2,
             in("rdx") arg3,
             in("rcx") arg4,
             in("r8") arg5,
+            lateout("rax") result,
+        );
+
+        ErrorStatus::from_u16(result)
+    }
+}
+
+#[inline(always)]
+fn syscall4(
+    num: SyscallNum,
+    arg1: usize,
+    arg2: usize,
+    arg3: usize,
+    arg4: usize,
+) -> Result<SysSuccess, ErrorStatus> {
+    let result: u16;
+    unsafe {
+        asm!(
+            "int 0x80",
+            in("rax") num as usize,
+            in("rdi") arg1,
+            in("rsi") arg2,
+            in("rdx") arg3,
+            in("rcx") arg4,
             lateout("rax") result,
         );
 
@@ -198,7 +261,14 @@ fn syswrite(
     len: usize,
     dest_wrote: &mut usize,
 ) -> Result<SysSuccess, ErrorStatus> {
-    syscall5(0x03, fd, offset as usize, buf as usize, len, dest_wrote as *mut _ as usize)
+    syscall5(
+        SyscallNum::SysWrite,
+        fd,
+        offset as usize,
+        buf as usize,
+        len,
+        dest_wrote as *mut _ as usize,
+    )
 }
 
 #[inline]
@@ -215,7 +285,14 @@ fn sysread(
     len: usize,
     dest_read: &mut usize,
 ) -> Result<SysSuccess, ErrorStatus> {
-    syscall5(0x04, fd, offset as usize, buf as usize, len, dest_read as *mut _ as usize)
+    syscall5(
+        SyscallNum::SysRead,
+        fd,
+        offset as usize,
+        buf as usize,
+        len,
+        dest_read as *mut _ as usize,
+    )
 }
 
 #[inline]
@@ -226,7 +303,7 @@ pub fn read(fd: usize, offset: isize, buf: &mut [u8]) -> Result<usize, ErrorStat
 
 #[inline]
 fn syssync(fd: usize) -> Result<SysSuccess, ErrorStatus> {
-    syscall1(0x10, fd)
+    syscall1(SyscallNum::SysSync, fd)
 }
 
 #[inline]
@@ -236,7 +313,7 @@ pub fn sync(fd: usize) -> Result<(), ErrorStatus> {
 
 #[inline]
 fn syssbrk(size: isize, target_ptr: &mut *mut u8) -> Result<SysSuccess, ErrorStatus> {
-    syscall2(0x12, size as usize, target_ptr as *mut _ as usize)
+    syscall2(SyscallNum::SysSbrk, size as usize, target_ptr as *mut _ as usize)
 }
 
 #[inline]
@@ -247,7 +324,7 @@ pub fn sbrk(size: isize) -> Result<*mut u8, ErrorStatus> {
 
 #[inline(always)]
 pub fn exit(code: usize) -> ! {
-    let _ = syscall1(0, code);
+    let _ = syscall1(SyscallNum::SysExit, code);
     unreachable!()
 }
 
@@ -255,7 +332,12 @@ pub fn exit(code: usize) -> ! {
 /// returns Err(ErrorStatus::Generic) if the buffer is too small to hold the cwd
 #[inline(always)]
 fn sysgetcwd(cwd_buf: &mut [u8], dest_len: &mut usize) -> Result<SysSuccess, ErrorStatus> {
-    syscall3(0xF, cwd_buf.as_mut_ptr() as usize, cwd_buf.len(), dest_len as *mut _ as usize)
+    syscall3(
+        SyscallNum::SysGetCWD,
+        cwd_buf.as_mut_ptr() as usize,
+        cwd_buf.len(),
+        dest_len as *mut _ as usize,
+    )
 }
 
 #[inline]
@@ -284,4 +366,70 @@ pub fn getcwd() -> Result<Vec<u8>, ErrorStatus> {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct SpawnFlags(u8);
+impl SpawnFlags {
+    pub const CLONE_RESOURCES: Self = Self(1 << 0);
+    pub const CLONE_CWD: Self = Self(1 << 1);
+
+    pub fn as_u8(&self) -> u8 {
+        self.0
+    }
+}
+
+impl ops::BitOr for SpawnFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+#[inline(always)]
+fn syspspawn(
+    name: Option<&str>,
+    path: &str,
+    argv: &[&str],
+    flags: SpawnFlags,
+    dest_pid: &mut usize,
+) -> Result<SysSuccess, ErrorStatus> {
+    /// the temporary config struct for the spawn syscall, passed to the syscall
+    /// because if it was passed as a bunch of arguments it would be too big to fit
+    /// inside the registers
+    #[repr(C)]
+    struct SpawnConfig {
+        name: (*const u8, usize),
+        argv: (*mut (*const u8, usize), usize),
+        flags: SpawnFlags,
+    }
+    impl SpawnConfig {
+        #[inline(always)]
+        fn new(name: Option<&str>, argv: &[&str], flags: SpawnFlags) -> Self {
+            let name = name.map(|s| (s.as_ptr(), s.len())).unwrap_or((ptr::null(), 0));
+            let argv: (*mut (*const u8, usize), usize) = unsafe { core::mem::transmute(argv) };
+            Self { name, argv, flags }
+        }
+    }
+
+    let config = SpawnConfig::new(name, argv, flags);
+    syscall4(
+        SyscallNum::SysPSpawn,
+        path.as_ptr() as usize,
+        path.len(),
+        (&raw const config) as usize,
+        dest_pid as *mut _ as usize,
+    )
+}
+
+#[inline]
+pub fn pspawn(
+    name: Option<&str>,
+    path: &str,
+    argv: &[&str],
+    flags: SpawnFlags,
+) -> Result<usize, ErrorStatus> {
+    let mut pid = 0;
+    syspspawn(name, path, argv, flags, &mut pid).map(|SysSuccess| pid)
 }
