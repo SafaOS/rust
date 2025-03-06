@@ -1,6 +1,6 @@
 use super::syscalls;
-use super::syscalls::ErrorStatus;
 use crate::io as std_io;
+use crate::os::safaos::errors::ErrorStatus;
 
 // SAFETY: must be called only once during runtime initialization.
 // NOTE: this is not guaranteed to run, for example when Rust code is called externally.

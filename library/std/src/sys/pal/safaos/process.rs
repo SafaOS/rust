@@ -1,9 +1,10 @@
+use super::syscalls::{self};
 pub use crate::ffi::OsString as EnvKey;
 use crate::ffi::{OsStr, OsString};
 use crate::num::NonZero;
+use crate::os::safaos::errors::ErrorStatus;
 use crate::path::Path;
 use crate::sys::fs::File;
-use crate::sys::pal::safaos::syscalls::{self, ErrorStatus};
 use crate::sys::pipe::AnonPipe;
 use crate::sys::unsupported;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
