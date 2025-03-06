@@ -3,6 +3,7 @@ use core::{ops, ptr};
 use crate::arch::asm;
 
 /// Keep in sync with the kernel implementition
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 enum SyscallNum {
@@ -87,6 +88,14 @@ impl TryFrom<u16> for ErrorStatus {
         } else {
             Ok(unsafe { core::mem::transmute(value) })
         }
+    }
+}
+
+#[stable(feature = "syscalls", since = "1.0.0")]
+impl TryFrom<i32> for ErrorStatus {
+    type Error = ();
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        if value > u16::MAX as i32 { Err(()) } else { Self::try_from(value as u16) }
     }
 }
 
@@ -374,10 +383,6 @@ pub struct SpawnFlags(u8);
 impl SpawnFlags {
     pub const CLONE_RESOURCES: Self = Self(1 << 0);
     pub const CLONE_CWD: Self = Self(1 << 1);
-
-    pub fn as_u8(&self) -> u8 {
-        self.0
-    }
 }
 
 impl ops::BitOr for SpawnFlags {
@@ -432,4 +437,11 @@ pub fn pspawn(
 ) -> Result<usize, ErrorStatus> {
     let mut pid = 0;
     syspspawn(name, path, argv, flags, &mut pid).map(|SysSuccess| pid)
+}
+
+#[inline]
+pub fn wait(pid: usize) -> Result<usize, ErrorStatus> {
+    let mut dest_exit_code = 0;
+    syscall2(SyscallNum::SysWait, pid, (&raw mut dest_exit_code) as usize)
+        .map(|SysSuccess| dest_exit_code)
 }
