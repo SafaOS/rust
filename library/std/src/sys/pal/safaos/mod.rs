@@ -16,4 +16,3 @@ pub mod time;
 
 mod common;
 pub use common::*;
-mod syscalls;

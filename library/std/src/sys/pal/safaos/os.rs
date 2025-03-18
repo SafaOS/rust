@@ -1,8 +1,9 @@
-use super::{syscalls, unsupported};
+use super::unsupported;
 use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
 use crate::marker::PhantomData;
-use crate::os::safaos::errors::ErrorStatus;
+use crate::os::safaos::abi::errors::ErrorStatus;
+use crate::os::safaos::abi::syscalls;
 use crate::path::{self, PathBuf};
 use crate::{fmt, io};
 
@@ -32,7 +33,7 @@ pub fn getcwd() -> io::Result<PathBuf> {
 }
 
 pub fn chdir(path: &path::Path) -> io::Result<()> {
-    syscalls::chdir(path)?;
+    syscalls::chdir(path.to_str().expect("path isn't a utf8 str"))?;
     Ok(())
 }
 

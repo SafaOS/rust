@@ -1,6 +1,7 @@
-use super::syscalls;
+use safa_abi::errors::SysResult;
+
 use crate::io as std_io;
-use crate::os::safaos::errors::ErrorStatus;
+use crate::os::safaos::abi::syscalls;
 
 // SAFETY: must be called only once during runtime initialization.
 // NOTE: this is not guaranteed to run, for example when Rust code is called externally.
@@ -24,10 +25,13 @@ pub fn is_interrupted(_code: i32) -> bool {
 
 pub fn decode_error_kind(code: i32) -> crate::io::ErrorKind {
     if code > u16::MAX as i32 {
-        crate::io::ErrorKind::Uncategorized
-    } else {
-        let status = ErrorStatus::try_from(code as u16).unwrap_or(ErrorStatus::Last);
-        status.into_io_error_kind()
+        return crate::io::ErrorKind::Uncategorized;
+    }
+
+    match SysResult::try_from(code as u16) {
+        Ok(SysResult::Sucess) => unreachable!(),
+        Ok(SysResult::Error(err)) => crate::os::safaos::into_io_error_kind(err),
+        Err(_) => crate::io::ErrorKind::Uncategorized,
     }
 }
 
