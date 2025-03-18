@@ -399,8 +399,11 @@ dependencies = [
 [[package]]
 name = "safa-abi"
 version = "0.1.0"
-source = "git+https://github.com/SafaOS/safa-abi#9dca4d88075f9029de6c18a14f632d9356f04bc2"
+source = "git+https://github.com/SafaOS/safa-abi#079a91beb7d07e59cd0835ea6b6864f69d11b6c5"
 dependencies = [
+ "compiler_builtins",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
  "safa-utils",
  "spin",
 ]
