@@ -1,12 +1,11 @@
-use super::syscalls;
 use crate::io;
-use crate::os::safaos::errors::ErrorStatus;
-
+use crate::os::safaos::abi::errors::ErrorStatus;
+use safa_abi::syscalls;
 #[stable(feature = "stdio", since = "1.0.0")]
 impl From<ErrorStatus> for io::Error {
     fn from(err: ErrorStatus) -> io::Error {
-        let kind = err.into_io_error_kind();
         let error = err.as_str();
+        let kind = crate::os::safaos::into_io_error_kind(err);
 
         io::Error::new(kind, error)
     }

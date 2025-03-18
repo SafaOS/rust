@@ -1,14 +1,15 @@
-use super::syscalls::{self};
 pub use crate::ffi::OsString as EnvKey;
 use crate::ffi::{OsStr, OsString};
 use crate::num::NonZero;
-use crate::os::safaos::errors::ErrorStatus;
+use crate::os::safaos::abi::errors::ErrorStatus;
+use crate::os::safaos::abi::syscalls;
 use crate::path::Path;
 use crate::sys::fs::File;
 use crate::sys::pipe::AnonPipe;
 use crate::sys::unsupported;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
 use crate::{fmt, io};
+use safa_abi::errors::SysResult;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Command
@@ -127,7 +128,7 @@ impl Command {
         let pid = syscalls::pspawn(
             Some(name),
             path,
-            &argv,
+            argv,
             syscalls::SpawnFlags::CLONE_RESOURCES | syscalls::SpawnFlags::CLONE_CWD,
         )?;
 
@@ -233,14 +234,10 @@ pub struct ExitStatus(u32);
 
 impl ExitStatus {
     pub fn exit_ok(&self) -> Result<(), ExitStatusError> {
-        if self.0 == 0 {
-            Ok(())
-        } else {
-            let error_status = ErrorStatus::try_from(self.0 as i32);
-            match error_status {
-                Ok(err) => Err(ExitStatusError::ErrorStatus(err)),
-                Err(()) => Err(ExitStatusError::Unknown(self.0)),
-            }
+        match SysResult::try_from(self.0 as u16) {
+            Ok(SysResult::Sucess) => Ok(()),
+            Ok(SysResult::Error(e)) => Err(ExitStatusError::ErrorStatus(e)),
+            Err(_) => Err(ExitStatusError::Unknown(self.0 as u32)),
         }
     }
 
@@ -251,10 +248,9 @@ impl ExitStatus {
 
 impl fmt::Display for ExitStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let error_status = ErrorStatus::try_from(self.0 as i32);
-        match error_status {
-            Ok(err) => write!(f, "{}", err.as_str()),
-            Err(_) => write!(f, "<unknown exit status {}>", self.0),
+        match self.exit_ok() {
+            Ok(()) => write!(f, "{}", "Success"),
+            Err(err) => write!(f, "{}", err),
         }
     }
 }
@@ -265,11 +261,11 @@ pub enum ExitStatusError {
     Unknown(u32),
 }
 
-impl Into<ExitStatus> for ExitStatusError {
-    fn into(self) -> ExitStatus {
+impl core::fmt::Display for ExitStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ErrorStatus(err) => ExitStatus(err as u32),
-            Self::Unknown(code) => ExitStatus(code),
+            Self::ErrorStatus(err) => write!(f, "{}", err.as_str()),
+            Self::Unknown(code) => write!(f, "<unknown exit status {}>", code),
         }
     }
 }
@@ -278,6 +274,15 @@ impl ExitStatusError {
     pub fn code(self) -> Option<NonZero<i32>> {
         let i32 = Into::<ExitStatus>::into(self).code()?;
         NonZero::new(i32)
+    }
+}
+
+impl Into<ExitStatus> for ExitStatusError {
+    fn into(self) -> ExitStatus {
+        match self {
+            Self::ErrorStatus(err) => ExitStatus(err as u32),
+            Self::Unknown(code) => ExitStatus(code),
+        }
     }
 }
 
