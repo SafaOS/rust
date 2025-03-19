@@ -112,6 +112,7 @@ unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
     unsafe { main_thread::set(thread::current_id()) };
 }
 
+#[allow(dead_code)]
 /// Clean up the thread-local runtime state. This *should* be run after all other
 /// code managed by the Rust runtime, but will not cause UB if that condition is
 /// not fulfilled. Also note that this function is not guaranteed to be run, but

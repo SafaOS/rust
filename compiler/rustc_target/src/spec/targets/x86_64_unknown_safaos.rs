@@ -3,7 +3,7 @@ use crate::spec::{
     TargetOptions,
 };
 
-pub fn target() -> Target {
+pub(crate) fn target() -> Target {
     Target {
         llvm_target: "x86_64-unknown-none".into(),
         pointer_width: 64,
