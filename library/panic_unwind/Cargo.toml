@@ -23,4 +23,8 @@ libc = { version = "0.2", default-features = false }
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(emscripten_wasm_eh)']
+check-cfg = [
+    'cfg(emscripten_wasm_eh)',
+    'cfg(bootstrap)',
+    'cfg(target_os, values("safaos"))',
+]

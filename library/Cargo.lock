@@ -201,7 +201,7 @@ dependencies = [
 [[package]]
 name = "macros"
 version = "0.1.0"
-source = "git+https://github.com/SafaOS/SafaOS?branch=rust#01637adbd07ed8a70ba2f9ead04b0990397931a9"
+source = "git+https://github.com/SafaOS/SafaOS?branch=rust#b9a3ac28677ac5a508557067bf73c55fcfb1609d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -399,7 +399,7 @@ dependencies = [
 [[package]]
 name = "safa-abi"
 version = "0.1.0"
-source = "git+https://github.com/SafaOS/safa-abi#079a91beb7d07e59cd0835ea6b6864f69d11b6c5"
+source = "git+https://github.com/SafaOS/safa-abi#8baee2952b8dea0788f33e0d7cdc22458c8c4f09"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
@@ -411,7 +411,7 @@ dependencies = [
 [[package]]
 name = "safa-utils"
 version = "0.1.0"
-source = "git+https://github.com/SafaOS/SafaOS?branch=rust#01637adbd07ed8a70ba2f9ead04b0990397931a9"
+source = "git+https://github.com/SafaOS/SafaOS?branch=rust#b9a3ac28677ac5a508557067bf73c55fcfb1609d"
 dependencies = [
  "heapless",
  "int-enum",

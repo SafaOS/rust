@@ -33,6 +33,7 @@ optimize_for_size = ["core/optimize_for_size"]
 level = "warn"
 check-cfg = [
     'cfg(bootstrap)',
+    'cfg(target_os, values("safaos"))',
     'cfg(no_global_oom_handling)',
     'cfg(no_rc)',
     'cfg(no_sync)',
