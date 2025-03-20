@@ -1,7 +1,7 @@
-use safa_abi::errors::SysResult;
+use safa_api::errors::SysResult;
 
 use crate::io as std_io;
-use crate::os::safaos::abi::syscalls;
+use crate::os::safaos::api::syscalls;
 
 // SAFETY: must be called only once during runtime initialization.
 // NOTE: this is not guaranteed to run, for example when Rust code is called externally.

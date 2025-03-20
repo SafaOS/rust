@@ -1,6 +1,6 @@
 use crate::io;
-use crate::os::safaos::abi::errors::ErrorStatus;
-use safa_abi::syscalls;
+use crate::os::safaos::api::errors::ErrorStatus;
+use safa_api::syscalls;
 #[stable(feature = "stdio", since = "1.0.0")]
 impl From<ErrorStatus> for io::Error {
     fn from(err: ErrorStatus) -> io::Error {
