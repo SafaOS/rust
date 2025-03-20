@@ -78,7 +78,7 @@ hermit-abi = { version = "0.5.0", features = [
 ], public = true }
 
 [target.'cfg(target_os = "safaos")'.dependencies]
-safa-api = { git = "https://github.com/SafaOS/safa-api", features = [
+safa-api = { version = "0.1.1", git = "https://github.com/SafaOS/safa-api", features = [
     'rustc-dep-of-std',
 ], public = true }
 
