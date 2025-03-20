@@ -41,16 +41,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "arrayvec"
-version = "0.7.6"
-source = "git+https://github.com/ObserverUnit/arrayvec#e5e58b2fc46256a699f601cb5ed869101e909326"
-dependencies = [
- "compiler_builtins",
- "rustc-std-workspace-alloc",
- "rustc-std-workspace-core",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -324,25 +314,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "safa-api"
-version = "0.1.1"
-source = "git+https://github.com/SafaOS/safa-api#a0081435c19ba9055b42e64694a7dd9d3eea599a"
+name = "safa-abi"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98006e8f0b2c5e080173dead429060fe691e28b670e9bb4a4695810d0f597553"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
- "safa-utils",
 ]
 
 [[package]]
-name = "safa-utils"
-version = "0.1.0"
-source = "git+https://github.com/SafaOS/SafaOS?branch=rust#c5dcf1f9d92a88143620b0feaf1b5293c44c398b"
+name = "safa-api"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a695660120af507b2fc52c0e86f99df08248d81ce7eec6e957ced2d964359ca"
 dependencies = [
- "arrayvec",
  "compiler_builtins",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
+ "safa-abi",
 ]
 
 [[package]]
