@@ -1,7 +1,7 @@
 #![stable(feature = "rust1", since = "1.0.0")]
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use safa_abi as abi;
-use safa_abi::errors::ErrorStatus;
+#[unstable(feature = "rustc_private", issue = "27812")]
+pub use safa_api as api;
+use safa_api::errors::ErrorStatus;
 
 #[inline(always)]
 pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {

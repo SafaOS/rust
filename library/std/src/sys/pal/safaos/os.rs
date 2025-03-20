@@ -2,8 +2,8 @@ use super::unsupported;
 use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
 use crate::marker::PhantomData;
-use crate::os::safaos::abi::errors::ErrorStatus;
-use crate::os::safaos::abi::syscalls;
+use crate::os::safaos::api::errors::ErrorStatus;
+use crate::os::safaos::api::syscalls;
 use crate::path::{self, PathBuf};
 use crate::{fmt, io};
 

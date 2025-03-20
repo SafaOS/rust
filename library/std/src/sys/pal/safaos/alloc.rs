@@ -1,4 +1,4 @@
-use safa_abi::alloc::GLOBAL_SYSTEM_ALLOCATOR;
+use safa_api::alloc::GLOBAL_SYSTEM_ALLOCATOR;
 
 use crate::ptr::NonNull;
 use crate::{
