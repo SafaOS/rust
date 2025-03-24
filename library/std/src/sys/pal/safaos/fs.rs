@@ -68,7 +68,8 @@ impl DirIterResource {
     }
 
     fn next(&mut self) -> Option<raw::DirEntry> {
-        let raw = syscalls::diriter_next(self.0).unwrap();
+        // should never error expect if there is no more entries it returns ErrorStatus::Generic
+        let raw = syscalls::diriter_next(self.0).ok()?;
         if raw == unsafe { core::mem::zeroed() } { None } else { Some(raw) }
     }
 }
@@ -364,8 +365,16 @@ impl File {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        let at = unsafe { *self.seek_at.get() };
-        Ok(self.fd.read(at, buf)?)
+        let at = unsafe { &mut *self.seek_at.get() };
+
+        let read = match self.fd.read(*at, buf) {
+            Ok(amount) => amount,
+            Err(ErrorStatus::InvaildOffset) => return Ok(0),
+            Err(other) => return Err(other.into()),
+        };
+        *at += read as isize;
+
+        Ok(read)
     }
 
     pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
@@ -376,13 +385,21 @@ impl File {
         false
     }
 
-    pub fn read_buf(&self, _cursor: BorrowedCursor<'_>) -> io::Result<()> {
-        todo!()
+    pub fn read_buf(&self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+        crate::io::default_read_buf(|buf| self.read(buf), cursor)
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
-        let at = unsafe { *self.seek_at.get() };
-        Ok(self.fd.write(at, buf)?)
+        let at = unsafe { &mut *self.seek_at.get() };
+
+        let wrote = match self.fd.write(*at, buf) {
+            Ok(amount) => amount,
+            Err(ErrorStatus::InvaildOffset) => return Ok(0),
+            Err(other) => return Err(other.into()),
+        };
+        *at += wrote as isize;
+
+        Ok(wrote)
     }
 
     pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
