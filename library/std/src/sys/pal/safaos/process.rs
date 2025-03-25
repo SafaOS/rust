@@ -287,7 +287,7 @@ impl Into<ExitStatus> for ExitStatusError {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub struct ExitCode(u8);
+pub struct ExitCode(usize);
 
 impl ExitCode {
     pub const SUCCESS: ExitCode = ExitCode(0);
@@ -300,6 +300,12 @@ impl ExitCode {
 
 impl From<u8> for ExitCode {
     fn from(code: u8) -> Self {
+        Self(code as usize)
+    }
+}
+
+impl From<usize> for ExitCode {
+    fn from(code: usize) -> Self {
         Self(code)
     }
 }
