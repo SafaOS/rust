@@ -316,7 +316,7 @@ impl File {
 
         let path = path_to_str!(path);
         match FileResource::open(path) {
-            Err(ErrorStatus::NoSuchAFileOrDirectory) if opts.create => {
+            Err(ErrorStatus::NoSuchAFileOrDirectory) if opts.create || opts.create_new => {
                 syscalls::create(path)?;
                 let fd = FileResource::open(path)?;
                 create_from_fd(fd)
