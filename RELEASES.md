@@ -391,7 +391,6 @@ Version 1.85.1 (2025-03-18)
 ==========================
 
 <a id="1.85.1"></a>
-
 - [Fix the doctest-merging feature of the 2024 Edition.](https://github.com/rust-lang/rust/pull/137899/)
 - [Relax some `target_feature` checks when generating docs.](https://github.com/rust-lang/rust/pull/137632/)
 - [Fix errors in `std::fs::rename` on Windows 10, version 1607.](https://github.com/rust-lang/rust/pull/137528/)
