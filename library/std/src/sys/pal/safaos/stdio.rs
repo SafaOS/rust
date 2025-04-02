@@ -1,5 +1,6 @@
 use crate::io;
 use crate::os::safaos::api::errors::ErrorStatus;
+use safa_api::process::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
 use safa_api::syscalls;
 #[stable(feature = "stdio", since = "1.0.0")]
 impl From<ErrorStatus> for io::Error {
@@ -16,7 +17,6 @@ pub struct Stdout;
 pub struct Stderr;
 
 impl Stdin {
-    pub const FD: usize = 0;
     pub const fn new() -> Stdin {
         Stdin
     }
@@ -24,12 +24,11 @@ impl Stdin {
 
 impl io::Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        Ok(syscalls::read(Self::FD, -1, buf)?)
+        Ok(syscalls::read(sysmeta_stdin(), -1, buf)?)
     }
 }
 
 impl Stdout {
-    const FD: usize = 1;
     pub const fn new() -> Stdout {
         Stdout
     }
@@ -37,17 +36,15 @@ impl Stdout {
 
 impl io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(syscalls::write(Self::FD, -1, buf)?)
+        Ok(syscalls::write(sysmeta_stdout(), -1, buf)?)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(syscalls::sync(1)?)
+        Ok(syscalls::sync(sysmeta_stdout())?)
     }
 }
 
 impl Stderr {
-    // TODO: please add a seprate stderr fd
-    const FD: usize = Stdout::FD;
     pub const fn new() -> Stderr {
         Stderr
     }
@@ -56,13 +53,13 @@ impl Stderr {
 impl io::Write for Stderr {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let wrote = syscalls::write(Self::FD, -1, buf)?;
+        let wrote = syscalls::write(sysmeta_stderr(), -1, buf)?;
         self.flush()?;
         Ok(wrote)
     }
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
-        Ok(syscalls::sync(Self::FD)?)
+        Ok(syscalls::sync(sysmeta_stderr())?)
     }
 }
 
