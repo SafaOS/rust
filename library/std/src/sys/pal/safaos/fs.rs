@@ -67,7 +67,7 @@ impl DirIterResource {
         file.diriter_open()
     }
 
-    fn next(&mut self) -> Option<raw::DirEntry> {
+    fn next(&mut self) -> Option<raw::io::DirEntry> {
         // should never error expect if there is no more entries it returns ErrorStatus::Generic
         let raw = syscalls::diriter_next(self.0).ok()?;
         if raw == unsafe { core::mem::zeroed() } { None } else { Some(raw) }
@@ -93,6 +93,12 @@ pub struct File {
     seek_at: UnsafeCell<isize>,
 }
 
+impl File {
+    pub(crate) fn fd(&self) -> usize {
+        self.fd.0
+    }
+}
+
 unsafe impl Sync for File {}
 unsafe impl Send for File {}
 
@@ -102,8 +108,8 @@ pub struct FileAttr {
     kind: FileType,
 }
 
-impl From<raw::FileAttr> for FileAttr {
-    fn from(other: raw::FileAttr) -> Self {
+impl From<raw::io::FileAttr> for FileAttr {
+    fn from(other: raw::io::FileAttr) -> Self {
         Self { size: other.size, kind: other.kind.into() }
     }
 }
@@ -117,7 +123,7 @@ pub struct ReadDir {
 }
 
 pub struct DirEntry {
-    inner: raw::DirEntry,
+    inner: raw::io::DirEntry,
     full_path: PathBuf,
 }
 
@@ -126,7 +132,7 @@ impl DirEntry {
         &self.inner.name[..self.inner.name_length]
     }
 
-    fn from_raw(raw: raw::DirEntry, parent_path: &Path) -> Self {
+    fn from_raw(raw: raw::io::DirEntry, parent_path: &Path) -> Self {
         let name = unsafe { OsStr::from_encoded_bytes_unchecked(&raw.name[..raw.name_length]) };
         let full_path = parent_path.join(name);
         Self { inner: raw, full_path }
@@ -155,12 +161,12 @@ pub enum FileType {
     Device,
 }
 
-impl From<raw::InodeType> for FileType {
-    fn from(value: raw::InodeType) -> Self {
+impl From<raw::io::InodeType> for FileType {
+    fn from(value: raw::io::InodeType) -> Self {
         match value {
-            raw::InodeType::Directory => Self::Directory,
-            raw::InodeType::File => Self::File,
-            raw::InodeType::Device => Self::Device,
+            raw::io::InodeType::Directory => Self::Directory,
+            raw::io::InodeType::File => Self::File,
+            raw::io::InodeType::Device => Self::Device,
         }
     }
 }
@@ -377,8 +383,8 @@ impl File {
         Ok(read)
     }
 
-    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        todo!()
+    pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+        crate::io::default_read_vectored(|buf| self.read(buf), bufs)
     }
 
     pub fn is_read_vectored(&self) -> bool {
@@ -402,8 +408,8 @@ impl File {
         Ok(wrote)
     }
 
-    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        todo!()
+    pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+        crate::io::default_write_vectored(|buf| self.write(buf), bufs)
     }
 
     pub fn is_write_vectored(&self) -> bool {

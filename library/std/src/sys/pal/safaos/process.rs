@@ -10,6 +10,7 @@ use crate::sys::unsupported;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
 use crate::{fmt, io};
 use safa_api::errors::SysResult;
+use safa_api::process::{sysmeta_stderr, sysmeta_stdout};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Command
@@ -44,10 +45,21 @@ pub enum Stdio {
     Inherit,
     Null,
     MakePipe,
-    ParentStdout,
-    ParentStderr,
-    #[allow(dead_code)] // This variant exists only for the Debug impl
+    InheritRawFd(usize),
     InheritFile(File),
+}
+
+impl Stdio {
+    // `&self` because Self::InheritFile has to live as long as the results
+    fn into_raw(&self) -> Option<usize> {
+        match self {
+            Stdio::Inherit => None,
+            Self::InheritRawFd(fd) => Some(*fd),
+            Stdio::Null => todo!(),
+            Stdio::InheritFile(f) => Some(f.fd()),
+            s => panic!("unsupported stdio: {:?}", s),
+        }
+    }
 }
 
 impl Command {
@@ -110,14 +122,19 @@ impl Command {
         default: Stdio,
         _needs_stdin: bool,
     ) -> io::Result<(Process, StdioPipes)> {
+        use safa_api::raw::processes::SpawnFlags;
+
+        let (stdin, stdout, stderr) = (
+            self.stdin.as_ref().unwrap_or(&default),
+            self.stdout.as_ref().unwrap_or(&default),
+            self.stderr.as_ref().unwrap_or(&default),
+        );
+
+        let (stdin, stdout, stderr) = (stdin.into_raw(), stdout.into_raw(), stderr.into_raw());
+
         assert!(
-            self.stdin.is_none()
-                && self.stdout.is_none()
-                && self.stderr.is_none()
-                && self.cwd.is_none()
-                && self.env.is_unchanged()
-                && matches!(default, Stdio::Inherit),
-            "Spawning a process with custom stdio, env or cwd is not supported for SafaOS"
+            self.cwd.is_none() && self.env.is_unchanged() && matches!(default, Stdio::Inherit),
+            "Spawning a process with custom env or cwd is not supported for SafaOS"
         );
 
         let name = unsafe { self.program.to_str().unwrap_unchecked() };
@@ -129,7 +146,10 @@ impl Command {
             Some(name),
             path,
             argv,
-            syscalls::SpawnFlags::CLONE_RESOURCES | syscalls::SpawnFlags::CLONE_CWD,
+            SpawnFlags::CLONE_RESOURCES | SpawnFlags::CLONE_CWD,
+            stdin,
+            stdout,
+            stderr,
         )?;
 
         Ok((Process(pid), StdioPipes::new()))
@@ -148,13 +168,13 @@ impl From<AnonPipe> for Stdio {
 
 impl From<io::Stdout> for Stdio {
     fn from(_: io::Stdout) -> Stdio {
-        Stdio::ParentStdout
+        Self::InheritRawFd(sysmeta_stdout())
     }
 }
 
 impl From<io::Stderr> for Stdio {
     fn from(_: io::Stderr) -> Stdio {
-        Stdio::ParentStderr
+        Self::InheritRawFd(sysmeta_stderr())
     }
 }
 
@@ -235,7 +255,7 @@ pub struct ExitStatus(u32);
 impl ExitStatus {
     pub fn exit_ok(&self) -> Result<(), ExitStatusError> {
         match SysResult::try_from(self.0 as u16) {
-            Ok(SysResult::Sucess) => Ok(()),
+            Ok(SysResult::Success) => Ok(()),
             Ok(SysResult::Error(e)) => Err(ExitStatusError::ErrorStatus(e)),
             Err(_) => Err(ExitStatusError::Unknown(self.0 as u32)),
         }
