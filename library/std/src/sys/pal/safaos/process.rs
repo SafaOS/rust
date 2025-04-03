@@ -41,13 +41,14 @@ impl StdioPipes {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Stdio {
     Inherit,
     Null,
     InheritStdout,
     InheritStderr,
     InheritStdin,
+    MakePipe,
     InheritFile(FileDesc),
 }
 
@@ -61,6 +62,7 @@ impl Stdio {
             Stdio::InheritStdin => Some(sysmeta_stdin()),
             Stdio::Null => todo!(),
             Stdio::InheritFile(f) => Some(f.fd()),
+            s => unimplemented!("stdio: {:?}", s),
         }
     }
 
@@ -78,6 +80,7 @@ impl Stdio {
             }
             Stdio::Null => None,
             Stdio::InheritFile(fd) => Some(AnonPipe::from_fd(fd)),
+            s => unimplemented!("stdio: {:?}", s),
         }
     }
 }
