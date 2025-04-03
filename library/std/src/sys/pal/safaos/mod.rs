@@ -9,6 +9,7 @@ pub mod net;
 pub mod os;
 pub mod pipe;
 pub mod process;
+pub mod resources;
 pub mod start;
 pub mod stdio;
 pub mod thread;

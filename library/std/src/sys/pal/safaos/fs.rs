@@ -1,106 +1,20 @@
-use core::cell::UnsafeCell;
-
 use crate::ffi::{OsStr, OsString};
 use crate::fmt;
 use crate::hash::Hash;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, SeekFrom};
+use crate::io::{Read, Seek, Write};
 use crate::path::{Path, PathBuf};
+use crate::sys::resources::{DirIterResource, FileDesc, FileResource};
 use crate::sys::time::SystemTime;
 use crate::sys::unsupported;
 use safa_api::errors::ErrorStatus;
 use safa_api::raw;
 use safa_api::syscalls;
 
-macro_rules! path_to_str {
-    ($path: expr) => {
-        unsafe { core::str::from_utf8_unchecked($path.as_os_str().as_encoded_bytes()) }
-    };
-}
-
-pub type ResourceID = usize;
+use super::resources::path_to_str;
 
 #[derive(Debug)]
-struct FileResource(ResourceID);
-
-impl FileResource {
-    fn open(path: &str) -> Result<Self, ErrorStatus> {
-        Ok(Self(syscalls::open(path)?))
-    }
-
-    fn attrs(&self) -> Result<FileAttr, ErrorStatus> {
-        let attr = syscalls::fattrs(self.0)?;
-        Ok(attr.into())
-    }
-
-    fn diriter_open(&self) -> Result<DirIterResource, ErrorStatus> {
-        let ri = syscalls::diriter_open(self.0)?;
-        Ok(DirIterResource(ri))
-    }
-
-    fn truncate(&self, len: usize) -> Result<(), ErrorStatus> {
-        syscalls::truncate(self.0, len)
-    }
-
-    fn sync(&self) -> Result<(), ErrorStatus> {
-        syscalls::sync(self.0)
-    }
-
-    fn read(&self, offset: isize, buf: &mut [u8]) -> Result<usize, ErrorStatus> {
-        syscalls::read(self.0, offset, buf)
-    }
-
-    fn write(&self, offset: isize, buf: &[u8]) -> Result<usize, ErrorStatus> {
-        syscalls::write(self.0, offset, buf)
-    }
-
-    fn size(&self) -> usize {
-        syscalls::fsize(self.0).unwrap()
-    }
-}
-
-#[derive(Debug)]
-struct DirIterResource(ResourceID);
-
-impl DirIterResource {
-    fn open(path: &str) -> Result<Self, ErrorStatus> {
-        let file = FileResource::open(path)?;
-        file.diriter_open()
-    }
-
-    fn next(&mut self) -> Option<raw::io::DirEntry> {
-        // should never error expect if there is no more entries it returns ErrorStatus::Generic
-        let raw = syscalls::diriter_next(self.0).ok()?;
-        if raw == unsafe { core::mem::zeroed() } { None } else { Some(raw) }
-    }
-}
-
-impl Drop for DirIterResource {
-    fn drop(&mut self) {
-        syscalls::diriter_close(self.0).unwrap()
-    }
-}
-
-impl Drop for FileResource {
-    fn drop(&mut self) {
-        syscalls::close(self.0).unwrap()
-    }
-}
-
-// FIXME: make seek_at a mutex?
-#[derive(Debug)]
-pub struct File {
-    fd: FileResource,
-    seek_at: UnsafeCell<isize>,
-}
-
-impl File {
-    pub(crate) fn fd(&self) -> usize {
-        self.fd.0
-    }
-}
-
-unsafe impl Sync for File {}
-unsafe impl Send for File {}
+pub struct File(FileDesc);
 
 #[derive(Debug, Clone)]
 pub struct FileAttr {
@@ -309,37 +223,34 @@ impl OpenOptions {
 }
 
 impl File {
+    pub fn into_raw(self) -> FileDesc {
+        self.0
+    }
+
     pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
-        let create_from_fd = move |fd: FileResource| {
-            if opts.write && opts.truncate {
-                fd.truncate(0)?;
-            }
-
-            let seek_at = if opts.append && opts.write { -1 } else { 0 };
-
-            Ok(Self { fd, seek_at: UnsafeCell::new(seek_at) })
-        };
+        let append = opts.append && opts.write;
+        let truncate = opts.truncate && opts.write;
 
         let path = path_to_str!(path);
-        match FileResource::open(path) {
+        let fd = match FileDesc::open(path, append, truncate) {
             Err(ErrorStatus::NoSuchAFileOrDirectory) if opts.create || opts.create_new => {
                 syscalls::create(path)?;
-                let fd = FileResource::open(path)?;
-                create_from_fd(fd)
+                FileDesc::open(path, append, truncate)?
             }
-            Err(other) => Err(other.into()),
-            Ok(_) if opts.create_new => Err(ErrorStatus::AlreadyExists.into()),
-            Ok(fd) => create_from_fd(fd),
-        }
+            Err(other) => return Err(other.into()),
+            Ok(_) if opts.create_new => return Err(ErrorStatus::AlreadyExists.into()),
+            Ok(fd) => fd,
+        };
+
+        Ok(Self(fd))
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        Ok(self.fd.attrs()?)
+        Ok(self.0.fd_raw().attrs()?)
     }
 
     pub fn fsync(&self) -> io::Result<()> {
-        self.fd.sync()?;
-        Ok(())
+        self.0.fsync()
     }
 
     pub fn datasync(&self) -> io::Result<()> {
@@ -367,53 +278,35 @@ impl File {
     }
 
     pub fn truncate(&self, size: u64) -> io::Result<()> {
-        Ok(self.fd.truncate(size as usize)?)
+        Ok(self.0.fd_raw().truncate(size as usize)?)
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        let at = unsafe { &mut *self.seek_at.get() };
-
-        let read = match self.fd.read(*at, buf) {
-            Ok(amount) => amount,
-            Err(ErrorStatus::InvaildOffset) => return Ok(0),
-            Err(other) => return Err(other.into()),
-        };
-        *at += read as isize;
-
-        Ok(read)
+        (&mut &self.0).read(buf)
     }
 
     pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        crate::io::default_read_vectored(|buf| self.read(buf), bufs)
+        (&mut &self.0).read_vectored(bufs)
     }
 
     pub fn is_read_vectored(&self) -> bool {
-        false
+        (&self.0).is_read_vectored()
     }
 
     pub fn read_buf(&self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
-        crate::io::default_read_buf(|buf| self.read(buf), cursor)
+        (&mut &self.0).read_buf(cursor)
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
-        let at = unsafe { &mut *self.seek_at.get() };
-
-        let wrote = match self.fd.write(*at, buf) {
-            Ok(amount) => amount,
-            Err(ErrorStatus::InvaildOffset) => return Ok(0),
-            Err(other) => return Err(other.into()),
-        };
-        *at += wrote as isize;
-
-        Ok(wrote)
+        (&mut &self.0).write(buf)
     }
 
     pub fn write_vectored(&self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        crate::io::default_write_vectored(|buf| self.write(buf), bufs)
+        (&mut &self.0).write_vectored(bufs)
     }
 
     pub fn is_write_vectored(&self) -> bool {
-        false
+        (&self.0).is_write_vectored()
     }
 
     pub fn flush(&self) -> io::Result<()> {
@@ -421,22 +314,7 @@ impl File {
     }
 
     pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
-        unsafe {
-            let seek_at = &mut *self.seek_at.get();
-            match pos {
-                SeekFrom::Start(start) => (*seek_at) = start as isize,
-                SeekFrom::End(end) => (*seek_at) = -(end as isize + 1),
-                SeekFrom::Current(current) => (*seek_at) += current as isize,
-            }
-
-            if (*seek_at) >= 0 {
-                Ok(*seek_at as u64)
-            } else {
-                let end_at = (-(*seek_at)) as usize;
-                let size = self.fd.size();
-                Ok((size - end_at + 1) as u64)
-            }
-        }
+        (&mut &self.0).seek(pos)
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
