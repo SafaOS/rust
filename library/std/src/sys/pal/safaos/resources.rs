@@ -14,7 +14,7 @@ pub(crate) use path_to_str;
 
 pub type ResourceID = usize;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct FileResource(ResourceID);
 
 impl FileResource {
@@ -86,6 +86,12 @@ impl Drop for FileResource {
 pub(crate) struct FileDesc {
     fd: FileResource,
     seek_at: UnsafeCell<isize>,
+}
+
+impl PartialEq for FileDesc {
+    fn eq(&self, other: &Self) -> bool {
+        self.fd == other.fd
+    }
 }
 
 unsafe impl Send for FileDesc {}
