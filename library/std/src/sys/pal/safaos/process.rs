@@ -6,11 +6,12 @@ use crate::os::safaos::api::syscalls;
 use crate::path::Path;
 use crate::sys::fs::File;
 use crate::sys::pipe::AnonPipe;
-use crate::sys::unsupported;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
 use crate::{fmt, io};
 use safa_api::errors::SysResult;
-use safa_api::process::{sysmeta_stderr, sysmeta_stdout};
+use safa_api::process::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
+
+use super::resources::FileDesc;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Command
@@ -44,9 +45,10 @@ impl StdioPipes {
 pub enum Stdio {
     Inherit,
     Null,
-    MakePipe,
-    InheritRawFd(usize),
-    InheritFile(File),
+    InheritStdout,
+    InheritStderr,
+    InheritStdin,
+    InheritFile(FileDesc),
 }
 
 impl Stdio {
@@ -54,10 +56,28 @@ impl Stdio {
     fn into_raw(&self) -> Option<usize> {
         match self {
             Stdio::Inherit => None,
-            Self::InheritRawFd(fd) => Some(*fd),
+            Stdio::InheritStdout => Some(sysmeta_stdout()),
+            Stdio::InheritStderr => Some(sysmeta_stderr()),
+            Stdio::InheritStdin => Some(sysmeta_stdin()),
             Stdio::Null => todo!(),
             Stdio::InheritFile(f) => Some(f.fd()),
-            s => panic!("unsupported stdio: {:?}", s),
+        }
+    }
+
+    fn into_anon_pipe(self) -> Option<AnonPipe> {
+        match self {
+            Stdio::Inherit => None,
+            Stdio::InheritStdout => {
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw(sysmeta_stdout()) }))
+            }
+            Stdio::InheritStderr => {
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw(sysmeta_stderr()) }))
+            }
+            Stdio::InheritStdin => {
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw(sysmeta_stdin()) }))
+            }
+            Stdio::Null => None,
+            Stdio::InheritFile(fd) => Some(AnonPipe::from_fd(fd)),
         }
     }
 }
@@ -119,21 +139,22 @@ impl Command {
 
     pub fn spawn(
         &mut self,
-        default: Stdio,
+        _default: Stdio,
         _needs_stdin: bool,
     ) -> io::Result<(Process, StdioPipes)> {
         use safa_api::raw::processes::SpawnFlags;
+        assert_eq!(_default, Stdio::Inherit);
 
         let (stdin, stdout, stderr) = (
-            self.stdin.as_ref().unwrap_or(&default),
-            self.stdout.as_ref().unwrap_or(&default),
-            self.stderr.as_ref().unwrap_or(&default),
+            self.stdin.take().unwrap_or(Stdio::InheritStdin),
+            self.stdout.take().unwrap_or(Stdio::InheritStdout),
+            self.stderr.take().unwrap_or(Stdio::InheritStderr),
         );
 
-        let (stdin, stdout, stderr) = (stdin.into_raw(), stdout.into_raw(), stderr.into_raw());
+        let (stdinn, stdoutn, stderrn) = (stdin.into_raw(), stdout.into_raw(), stderr.into_raw());
 
         assert!(
-            self.cwd.is_none() && self.env.is_unchanged() && matches!(default, Stdio::Inherit),
+            self.cwd.is_none() && self.env.is_unchanged(),
             "Spawning a process with custom env or cwd is not supported for SafaOS"
         );
 
@@ -147,16 +168,19 @@ impl Command {
             path,
             argv,
             SpawnFlags::CLONE_RESOURCES | SpawnFlags::CLONE_CWD,
-            stdin,
-            stdout,
-            stderr,
+            stdinn,
+            stdoutn,
+            stderrn,
         )?;
 
-        Ok((Process(pid), StdioPipes::new()))
+        let (stdin, stdout, stderr) =
+            (stdin.into_anon_pipe(), stdout.into_anon_pipe(), stderr.into_anon_pipe());
+        Ok((Process(pid), StdioPipes { stdin, stdout, stderr }))
     }
 
     pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-        unsupported()
+        let (proc, pipes) = self.spawn(Stdio::Inherit, false)?;
+        crate::sys_common::process::wait_with_output(proc, pipes)
     }
 }
 
@@ -168,19 +192,19 @@ impl From<AnonPipe> for Stdio {
 
 impl From<io::Stdout> for Stdio {
     fn from(_: io::Stdout) -> Stdio {
-        Self::InheritRawFd(sysmeta_stdout())
+        Self::InheritStdout
     }
 }
 
 impl From<io::Stderr> for Stdio {
     fn from(_: io::Stderr) -> Stdio {
-        Self::InheritRawFd(sysmeta_stderr())
+        Self::InheritStderr
     }
 }
 
 impl From<File> for Stdio {
     fn from(file: File) -> Stdio {
-        Stdio::InheritFile(file)
+        Stdio::InheritFile(file.into_raw())
     }
 }
 
