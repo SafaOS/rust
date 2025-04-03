@@ -189,7 +189,7 @@ impl Command {
 
 impl From<AnonPipe> for Stdio {
     fn from(pipe: AnonPipe) -> Stdio {
-        pipe.diverge()
+        Stdio::InheritFile(pipe.into_raw())
     }
 }
 
