@@ -15,7 +15,7 @@ jobs:
       with:
         submodules: 'recursive'
     - name: Update
-      run: rustup update
+      run: rustup default 1.85.1
     - name: build
       run: ./build.sh
     - name: Upload a Build Artifact
