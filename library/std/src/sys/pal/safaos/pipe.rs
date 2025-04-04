@@ -60,8 +60,6 @@ impl AnonPipe {
 /// FIXME: This is a temporary implementation I have no idea what an AnonPipe is forgive my naiveness
 /// BUT I NEED IT FOR [`crate::sys::process::Command::output`]
 pub fn read2(p1: AnonPipe, v1: &mut Vec<u8>, p2: AnonPipe, v2: &mut Vec<u8>) -> io::Result<()> {
-    let mut p1 = &p1.into_raw();
-    let mut p2 = &p2.into_raw();
     p1.read_to_end(v1)?;
     p2.read_to_end(v2)?;
     Ok(())
