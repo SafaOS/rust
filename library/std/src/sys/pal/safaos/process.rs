@@ -28,6 +28,7 @@ pub struct Command {
     stderr: Option<Stdio>,
 }
 
+#[derive(Debug)]
 // passed back to std::process with the pipes connected to the child, if any
 // were requested
 pub struct StdioPipes {
@@ -70,13 +71,13 @@ impl Stdio {
         match self {
             Stdio::Inherit => None,
             Stdio::InheritStdout => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw(sysmeta_stdout()) }))
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysmeta_stdout()) }))
             }
             Stdio::InheritStderr => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw(sysmeta_stderr()) }))
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysmeta_stderr()) }))
             }
             Stdio::InheritStdin => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw(sysmeta_stdin()) }))
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysmeta_stdin()) }))
             }
             Stdio::Null => None,
             Stdio::InheritFile(fd) => Some(AnonPipe::from_fd(fd)),
@@ -182,8 +183,20 @@ impl Command {
     }
 
     pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-        let (proc, pipes) = self.spawn(Stdio::Inherit, false)?;
-        crate::sys_common::process::wait_with_output(proc, pipes)
+        let (mut proc, mut pipes) = self.spawn(Stdio::Inherit, false)?;
+        let status = proc.wait()?;
+        drop(pipes.stdin.take());
+
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        // TODO: properly add Pipes
+        if let Some(out) = pipes.stdout.take() {
+            out.read_to_end(&mut stdout)?;
+        }
+
+        if let Some(err) = pipes.stderr.take() {
+            err.read_to_end(&mut stderr)?;
+        }
+        Ok((status, stdout, stderr))
     }
 }
 

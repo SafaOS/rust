@@ -1,4 +1,5 @@
 use core::cell::UnsafeCell;
+use core::mem::ManuallyDrop;
 
 use crate::io::{self, SeekFrom};
 use crate::sys::fs::FileAttr;
@@ -81,11 +82,23 @@ impl Drop for FileResource {
     }
 }
 
+impl Clone for FileResource {
+    fn clone(&self) -> Self {
+        Self(syscalls::dup(self.0).unwrap())
+    }
+}
+
 // FIXME: make seek_at a mutex?
 #[derive(Debug)]
 pub(crate) struct FileDesc {
     fd: FileResource,
     seek_at: UnsafeCell<isize>,
+}
+
+impl Clone for FileDesc {
+    fn clone(&self) -> Self {
+        unsafe { Self { fd: self.fd.clone(), seek_at: UnsafeCell::new(*self.seek_at.get()) } }
+    }
 }
 
 impl PartialEq for FileDesc {
@@ -98,8 +111,18 @@ unsafe impl Send for FileDesc {}
 unsafe impl Sync for FileDesc {}
 
 impl FileDesc {
+    /// converts a raw resource id into a FileDesc
+    /// this is unsafe because the resource id is not checked for validity
     pub unsafe fn from_raw(ri: usize) -> Self {
         Self { fd: FileResource(ri), seek_at: UnsafeCell::new(0) }
+    }
+
+    /// duplicates a raw resource id into a FileDesc
+    /// this is unsafe because the resource id is not checked for validity
+    /// the returned FileDesc is a duplicate of the original with a different resource id and therefore doesn't take ownership of the resource
+    pub unsafe fn from_raw_dup(ri: usize) -> Self {
+        let fd = unsafe { ManuallyDrop::new(Self::from_raw(ri)) };
+        ManuallyDrop::into_inner(fd.clone())
     }
 
     pub(crate) fn fd(&self) -> usize {
