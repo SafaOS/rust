@@ -318,7 +318,7 @@ impl File {
     }
 
     pub fn duplicate(&self) -> io::Result<File> {
-        unsupported()
+        Ok(Self(self.0.clone()))
     }
 
     pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
