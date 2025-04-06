@@ -171,7 +171,7 @@ impl Command {
             Some(name),
             path,
             argv,
-            SpawnFlags::CLONE_RESOURCES | SpawnFlags::CLONE_CWD,
+            SpawnFlags::CLONE_CWD,
             stdinn,
             stdoutn,
             stderrn,
