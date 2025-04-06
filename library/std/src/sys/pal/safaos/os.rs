@@ -1,3 +1,4 @@
+use super::resources::path_to_str;
 use super::unsupported;
 use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
@@ -27,13 +28,14 @@ pub fn error_string(errno: i32) -> String {
 
 pub fn getcwd() -> io::Result<PathBuf> {
     let cwd = syscalls::getcwd()?;
-    let path = unsafe { OsString::from_encoded_bytes_unchecked(cwd) };
+    let path = unsafe { OsString::from_encoded_bytes_unchecked(cwd.into_bytes()) };
     let path = PathBuf::from(path);
     Ok(path)
 }
 
 pub fn chdir(path: &path::Path) -> io::Result<()> {
-    syscalls::chdir(path.to_str().expect("path isn't a utf8 str"))?;
+    let path = path_to_str!(path);
+    syscalls::chdir(path)?;
     Ok(())
 }
 
