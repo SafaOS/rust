@@ -1,35 +1,34 @@
-use core::ptr::NonNull;
-
-use super::args::RAW_ARGS;
-use super::args::RawArgs;
-use super::os::exit;
-use crate::mem::MaybeUninit;
+use safa_api::raw::{NonNullSlice, RawSliceMut};
+use safa_api::syscalls::exit;
 
 extern "C" {
     fn main() -> u16;
 }
 
-unsafe fn _start_inner(argc: usize, argv: *mut (NonNull<u8>, usize)) -> ! {
+unsafe fn _start_inner(
+    argc: usize,
+    argv: *mut NonNullSlice<u8>,
+    envc: usize,
+    envp: *mut NonNullSlice<u8>,
+) -> ! {
     unsafe {
-        let raw_args = match argc == 0 || argv.is_null() {
-            true => None,
-            false => {
-                let args_slice = core::slice::from_raw_parts_mut(argv, argc);
-                let args = NonNull::new_unchecked(args_slice as *mut _);
-                Some(RawArgs { args })
-            }
-        };
-
-        RAW_ARGS.get().write(MaybeUninit::new(raw_args));
+        let args = RawSliceMut::from_raw_parts(argv, argc);
+        let env = RawSliceMut::from_raw_parts(envp, envc);
+        safa_api::process::sysapi_init(args, env);
         let results = main();
 
-        exit(results as i32)
+        exit(results as usize);
     }
 }
 
 #[no_mangle]
 #[allow(unused)]
-pub extern "C" fn _start(argc: usize, argv: *mut (NonNull<u8>, usize)) {
+pub extern "C" fn _start(
+    argc: usize,
+    argv: *mut NonNullSlice<u8>,
+    envc: usize,
+    envp: *mut NonNullSlice<u8>,
+) {
     unsafe {
         core::arch::asm!(
             "
@@ -39,6 +38,6 @@ pub extern "C" fn _start(argc: usize, argv: *mut (NonNull<u8>, usize)) {
         ",
             options(nostack)
         );
-        _start_inner(argc, argv);
+        _start_inner(argc, argv, envc, envp);
     };
 }
