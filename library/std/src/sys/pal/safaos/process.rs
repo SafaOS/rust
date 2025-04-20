@@ -9,7 +9,7 @@ use crate::sys::pipe::AnonPipe;
 use crate::sys_common::process::{CommandEnv, CommandEnvs};
 use crate::{fmt, io};
 use safa_api::errors::SysResult;
-use safa_api::process::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
+use safa_api::process::stdio::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
 
 use super::resources::FileDesc;
 

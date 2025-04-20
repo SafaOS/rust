@@ -111,7 +111,7 @@ impl Iterator for Env {
 }
 
 pub fn env() -> Env {
-    let all = safa_api::process::env_get_all();
+    let all = safa_api::process::env::env_get_all();
     let mut results = Vec::with_capacity(all.len());
     for (key, value) in all {
         results.push((unsafe { OsString::from_encoded_bytes_unchecked(key.to_vec()) }, unsafe {
@@ -123,17 +123,17 @@ pub fn env() -> Env {
 }
 
 pub fn getenv(key: &OsStr) -> Option<OsString> {
-    safa_api::process::env_get(key.as_encoded_bytes())
+    safa_api::process::env::env_get(key.as_encoded_bytes())
         .map(|s| unsafe { OsString::from_encoded_bytes_unchecked(s.to_vec()) })
 }
 
 pub unsafe fn setenv(key: &OsStr, value: &OsStr) -> io::Result<()> {
-    safa_api::process::env_set(key.as_encoded_bytes(), value.as_encoded_bytes());
+    safa_api::process::env::env_set(key.as_encoded_bytes(), value.as_encoded_bytes());
     Ok(())
 }
 
 pub unsafe fn unsetenv(key: &OsStr) -> io::Result<()> {
-    safa_api::process::env_remove(key.as_encoded_bytes());
+    safa_api::process::env::env_remove(key.as_encoded_bytes());
     Ok(())
 }
 

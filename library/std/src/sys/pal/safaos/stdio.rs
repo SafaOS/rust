@@ -1,6 +1,6 @@
 use crate::io;
 use crate::os::safaos::api::errors::ErrorStatus;
-use safa_api::process::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
+use safa_api::process::stdio::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
 use safa_api::syscalls;
 #[stable(feature = "stdio", since = "1.0.0")]
 impl From<ErrorStatus> for io::Error {

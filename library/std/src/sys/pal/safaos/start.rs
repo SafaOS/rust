@@ -1,3 +1,4 @@
+use safa_api::raw::processes::AbiStructures;
 use safa_api::raw::{NonNullSlice, RawSliceMut};
 use safa_api::syscalls::exit;
 
@@ -10,11 +11,12 @@ unsafe fn _start_inner(
     argv: *mut NonNullSlice<u8>,
     envc: usize,
     envp: *mut NonNullSlice<u8>,
+    task_abi_structures: *const AbiStructures,
 ) -> ! {
     unsafe {
         let args = RawSliceMut::from_raw_parts(argv, argc);
         let env = RawSliceMut::from_raw_parts(envp, envc);
-        safa_api::process::sysapi_init(args, env);
+        safa_api::process::init::sysapi_init(args, env, *task_abi_structures);
         let results = main();
 
         exit(results as usize);
@@ -28,6 +30,7 @@ pub extern "C" fn _start(
     argv: *mut NonNullSlice<u8>,
     envc: usize,
     envp: *mut NonNullSlice<u8>,
+    task_abi_structures: *const AbiStructures,
 ) {
     unsafe {
         core::arch::asm!(
@@ -36,8 +39,7 @@ pub extern "C" fn _start(
             push rbp
             push rbp
         ",
-            options(nostack)
         );
-        _start_inner(argc, argv, envc, envp);
+        _start_inner(argc, argv, envc, envp, task_abi_structures);
     };
 }

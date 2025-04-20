@@ -2,9 +2,9 @@
 #[unstable(feature = "rustc_private", issue = "27812")]
 pub use safa_api as api;
 
+use safa_api::errors::ErrorStatus;
 #[stable(feature = "safa_api", since = "1.0.0")]
 pub use safa_api::*;
-use safa_api::errors::ErrorStatus;
 
 #[inline(always)]
 pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
@@ -18,8 +18,8 @@ pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
         Busy => IoErrorKind::ResourceBusy,
         NotADirectory => IoErrorKind::NotADirectory,
         NotAFile => IoErrorKind::IsADirectory,
-        InvaildPath => IoErrorKind::InvalidInput,
-        InvaildStr => IoErrorKind::InvalidData,
+        InvalidPath => IoErrorKind::InvalidInput,
+        InvalidStr => IoErrorKind::InvalidData,
         OutOfMemory | MMapError => IoErrorKind::OutOfMemory,
         _ => IoErrorKind::Other,
     }

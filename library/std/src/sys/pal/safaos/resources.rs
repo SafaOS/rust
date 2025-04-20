@@ -155,7 +155,7 @@ impl io::Read for &FileDesc {
 
         let read = match self.fd.read(*at, buf) {
             Ok(amount) => amount,
-            Err(ErrorStatus::InvaildOffset) => return Ok(0),
+            Err(ErrorStatus::InvalidOffset) => return Ok(0),
             Err(other) => return Err(other.into()),
         };
         *at += read as isize;
@@ -171,7 +171,7 @@ impl io::Write for &FileDesc {
 
         let wrote = match self.fd.write(*at, buf) {
             Ok(amount) => amount,
-            Err(ErrorStatus::InvaildOffset) => return Ok(0),
+            Err(ErrorStatus::InvalidOffset) => return Ok(0),
             Err(other) => return Err(other.into()),
         };
         *at += wrote as isize;
