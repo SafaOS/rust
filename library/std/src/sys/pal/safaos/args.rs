@@ -1,10 +1,10 @@
 use crate::ffi::OsString;
 use crate::fmt;
 
-pub struct Args(safa_api::process::ArgsIter);
+pub struct Args(safa_api::process::args::ArgsIter);
 
 pub fn args() -> Args {
-    Args(safa_api::process::ArgsIter::get())
+    Args(safa_api::process::args::ArgsIter::get())
 }
 
 impl fmt::Debug for Args {
