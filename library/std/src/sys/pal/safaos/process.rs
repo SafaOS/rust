@@ -36,11 +36,6 @@ pub struct StdioPipes {
     pub stdout: Option<AnonPipe>,
     pub stderr: Option<AnonPipe>,
 }
-impl StdioPipes {
-    pub fn new() -> Self {
-        Self { stdin: None, stdout: None, stderr: None }
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub enum Stdio {

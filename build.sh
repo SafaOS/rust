@@ -1,7 +1,8 @@
 #!/bin/bash
 # Script to build libstd and prepare SafaOS's toolchain
 set -eu
-export TARGET_DIR="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-safaos"
+export VERSION="1.86.0"
+export TARGET_DIR="$(rustc "+$VERSION" --print sysroot)/lib/rustlib/x86_64-unknown-safaos"
 export TARGET_DIR_LIB="$TARGET_DIR/lib"
 mkdir -p $TARGET_DIR_LIB
 
@@ -14,7 +15,7 @@ export RUSTFLAGS="-Cforce-unwind-tables=yes -Cembed-bitcode=yes -Zforce-unstable
 export __CARGO_DEFAULT_LIB_METADATA="stablestd"
 export RUST_COMPILER_RT_ROOT="$(pwd)/src/llvm-project/compiler-rt"
 
-cargo build --target x86_64-unknown-safaos -Zbinary-dep-depinfo \
+cargo "+$VERSION" build --target x86_64-unknown-safaos -Zbinary-dep-depinfo \
           --release \
           --features "compiler-builtins-c compiler-builtins-mem" \
           --manifest-path "library/sysroot/Cargo.toml"
