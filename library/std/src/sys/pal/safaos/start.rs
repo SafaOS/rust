@@ -33,12 +33,21 @@ pub extern "C" fn _start(
     task_abi_structures: *const AbiStructures,
 ) {
     unsafe {
+        #[cfg(target_arch = "x86_64")]
         core::arch::asm!(
             "
             xor rbp, rbp
             push rbp
             push rbp
         ",
+        );
+        #[cfg(target_arch = "aarch64")]
+        core::arch::asm!(
+            "
+            mov fp, #0
+            sub sp, sp, #16
+            stp xzr, xzr, [sp]
+            "
         );
         _start_inner(argc, argv, envc, envp, task_abi_structures);
     };
