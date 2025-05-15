@@ -60,12 +60,12 @@ jobs:
     - name: Prepare Release
       run: |
         cd artifacts
-        cd x86_64-unknown-safaos && tar -zcvf ../x86_64_toolchain.tar x86_64-unknown-safaos-toolchain/*
-        cd ../aarch64-unknown-safaos && tar -zcvf ../aarch64_toolchain.tar aarch64-unknown-safaos-toolchain/*
+        cd x86_64-unknown-safaos && tar -zcvf ../x86_64-toolchain.tar *
+        cd ../aarch64-unknown-safaos && tar -zcvf ../aarch64-toolchain.tar *
     - name: Release
       uses: ncipollo/release-action@v1
       with:
-        artifacts: "x86_64_toolchain.tar, aarch64_toolchain.tar"
+        artifacts: "x86_64-toolchain.tar, aarch64-toolchain.tar"
         # set prerelease to true if tag name contains "test"
         prerelease: ${{ contains(github.ref_name, 'test') }}
       # Release only if it's a tag
