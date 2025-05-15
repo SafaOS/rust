@@ -102,4 +102,4 @@ flake.lock
 # Before adding new lines, see the comment at the top.
 
 # SafaOS specific
-x86_64-unknown-safaos*
+*-unknown-safaos*
