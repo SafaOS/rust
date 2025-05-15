@@ -48,7 +48,7 @@ jobs:
         # A file, directory or wildcard pattern that describes what to upload
         path: aarch64-unknown-safaos-toolchain
   release:
-    needs: [build_x86, build_aarch64]
+    needs: [build-x86, build-aarch64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
