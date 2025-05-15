@@ -53,20 +53,15 @@ jobs:
     permissions:
       contents: write
     steps:
-    - name: Download x86 artifact
-      uses: actions/download-artifact@v3.0.2
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
       with:
-        name: x86_64-unknown-safaos
-        path: x86_64-unknown-safaos-toolchain
-    - name: Download aarch64 artifact
-      uses: actions/download-artifact@v3.0.2
-      with:
-        name: aarch64-unknown-safaos
-        path: aarch64-unknown-safaos-toolchain
+        path: artifacts
     - name: Prepare Release
       run: |
-        tar -zcvf x86_64_toolchain.tar x86_64-unknown-safaos-toolchain/*
-        tar -zcvf aarch64_toolchain.tar aarch64-unknown-safaos-toolchain/*
+        cd artifacts
+        tar -zcvf ../x86_64_toolchain.tar x86_64-unknown-safaos-toolchain/*
+        tar -zcvf ../aarch64_toolchain.tar aarch64-unknown-safaos-toolchain/*
     - name: Release
       uses: ncipollo/release-action@v1
       with:
