@@ -1,7 +1,7 @@
 #!/bin/bash
 # Script to build libstd and prepare SafaOS's toolchain
 set -eu
-export VERSION="1.86.0"
+export VERSION="1.88.0"
 export ARCH="x86_64"
 
 for arg in "$@"; do

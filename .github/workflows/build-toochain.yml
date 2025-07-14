@@ -15,7 +15,7 @@ jobs:
       with:
         submodules: 'recursive'
     - name: Update
-      run: rustup default 1.85.1
+      run: rustup default 1.88.0
     - name: build
       run: ./build.sh
     - name: Upload a Build Artifact
@@ -37,7 +37,7 @@ jobs:
     - name: Prepare System
       run: sudo apt update && sudo apt install -y gcc-aarch64-linux-gnu
     - name: Update
-      run: rustup default 1.85.1
+      run: rustup default 1.88.0
     - name: build
       run: ./build.sh -a aarch64
     - name: Upload a Build Artifact
