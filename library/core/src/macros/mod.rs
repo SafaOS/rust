@@ -37,7 +37,7 @@ macro_rules! panic {
 /// ```
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "assert_eq_macro")]
+#[rustc_diagnostic_item = "assert_eq_macro"]
 #[allow_internal_unstable(panic_internals)]
 macro_rules! assert_eq {
     ($left:expr, $right:expr $(,)?) => {
@@ -93,7 +93,7 @@ macro_rules! assert_eq {
 /// ```
 #[macro_export]
 #[stable(feature = "assert_ne", since = "1.13.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "assert_ne_macro")]
+#[rustc_diagnostic_item = "assert_ne_macro"]
 #[allow_internal_unstable(panic_internals)]
 macro_rules! assert_ne {
     ($left:expr, $right:expr $(,)?) => {
@@ -213,95 +213,6 @@ pub macro assert_matches {
 /// #![feature(cfg_match)]
 ///
 /// cfg_match! {
-///     cfg(unix) => {
-///         fn foo() { /* unix specific functionality */ }
-///     }
-///     cfg(target_pointer_width = "32") => {
-///         fn foo() { /* non-unix, 32-bit functionality */ }
-///     }
-///     _ => {
-///         fn foo() { /* fallback implementation */ }
-///     }
-/// }
-/// ```
-#[cfg(bootstrap)]
-#[unstable(feature = "cfg_match", issue = "115585")]
-#[rustc_diagnostic_item = "cfg_match"]
-pub macro cfg_match {
-    // with a final wildcard
-    (
-        $(cfg($initial_meta:meta) => { $($initial_tokens:tt)* })+
-        _ => { $($extra_tokens:tt)* }
-    ) => {
-        cfg_match! {
-            @__items ();
-            $((($initial_meta) ($($initial_tokens)*)),)+
-            (() ($($extra_tokens)*)),
-        }
-    },
-
-    // without a final wildcard
-    (
-        $(cfg($extra_meta:meta) => { $($extra_tokens:tt)* })*
-    ) => {
-        cfg_match! {
-            @__items ();
-            $((($extra_meta) ($($extra_tokens)*)),)*
-        }
-    },
-
-    // Internal and recursive macro to emit all the items
-    //
-    // Collects all the previous cfgs in a list at the beginning, so they can be
-    // negated. After the semicolon is all the remaining items.
-    (@__items ($($_:meta,)*);) => {},
-    (
-        @__items ($($no:meta,)*);
-        (($($yes:meta)?) ($($tokens:tt)*)),
-        $($rest:tt,)*
-    ) => {
-        // Emit all items within one block, applying an appropriate #[cfg]. The
-        // #[cfg] will require all `$yes` matchers specified and must also negate
-        // all previous matchers.
-        #[cfg(all(
-            $($yes,)?
-            not(any($($no),*))
-        ))]
-        cfg_match! { @__identity $($tokens)* }
-
-        // Recurse to emit all other items in `$rest`, and when we do so add all
-        // our `$yes` matchers to the list of `$no` matchers as future emissions
-        // will have to negate everything we just matched as well.
-        cfg_match! {
-            @__items ($($no,)* $($yes,)?);
-            $($rest,)*
-        }
-    },
-
-    // Internal macro to make __apply work out right for different match types,
-    // because of how macros match/expand stuff.
-    (@__identity $($tokens:tt)*) => {
-        $($tokens)*
-    }
-}
-
-/// A macro for defining `#[cfg]` match-like statements.
-///
-/// It is similar to the `if/elif` C preprocessor macro by allowing definition of a cascade of
-/// `#[cfg]` cases, emitting the implementation which matches first.
-///
-/// This allows you to conveniently provide a long list `#[cfg]`'d blocks of code
-/// without having to rewrite each clause multiple times.
-///
-/// Trailing `_` wildcard match arms are **optional** and they indicate a fallback branch when
-/// all previous declarations do not evaluate to true.
-///
-/// # Example
-///
-/// ```
-/// #![feature(cfg_match)]
-///
-/// cfg_match! {
 ///     unix => {
 ///         fn foo() { /* unix specific functionality */ }
 ///     }
@@ -324,12 +235,12 @@ pub macro cfg_match {
 ///     _ => { "Behind every successful diet is an unwatched pizza" }
 /// }};
 /// ```
-#[cfg(not(bootstrap))]
 #[unstable(feature = "cfg_match", issue = "115585")]
 #[rustc_diagnostic_item = "cfg_match"]
+#[rustc_macro_transparency = "semitransparent"]
 pub macro cfg_match {
     ({ $($tt:tt)* }) => {{
-        cfg_match! { $($tt)* }
+        $crate::cfg_match! { $($tt)* }
     }},
     (_ => { $($output:tt)* }) => {
         $($output)*
@@ -339,10 +250,10 @@ pub macro cfg_match {
         $($( $rest:tt )+)?
     ) => {
         #[cfg($cfg)]
-        cfg_match! { _ => $output }
+        $crate::cfg_match! { _ => $output }
         $(
             #[cfg(not($cfg))]
-            cfg_match! { $($rest)+ }
+            $crate::cfg_match! { $($rest)+ }
         )?
     },
 }
@@ -421,7 +332,7 @@ macro_rules! debug_assert {
 /// ```
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "debug_assert_eq_macro")]
+#[rustc_diagnostic_item = "debug_assert_eq_macro"]
 macro_rules! debug_assert_eq {
     ($($arg:tt)*) => {
         if $crate::cfg!(debug_assertions) {
@@ -451,7 +362,7 @@ macro_rules! debug_assert_eq {
 /// ```
 #[macro_export]
 #[stable(feature = "assert_ne", since = "1.13.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "debug_assert_ne_macro")]
+#[rustc_diagnostic_item = "debug_assert_ne_macro"]
 macro_rules! debug_assert_ne {
     ($($arg:tt)*) => {
         if $crate::cfg!(debug_assertions) {
@@ -532,7 +443,7 @@ pub macro debug_assert_matches($($arg:tt)*) {
 /// ```
 #[macro_export]
 #[stable(feature = "matches_macro", since = "1.42.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "matches_macro")]
+#[rustc_diagnostic_item = "matches_macro"]
 macro_rules! matches {
     ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
         match $expression {
@@ -707,7 +618,7 @@ macro_rules! r#try {
 /// ```
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "write_macro")]
+#[rustc_diagnostic_item = "write_macro"]
 macro_rules! write {
     ($dst:expr, $($arg:tt)*) => {
         $dst.write_fmt($crate::format_args!($($arg)*))
@@ -741,7 +652,7 @@ macro_rules! write {
 /// ```
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "writeln_macro")]
+#[rustc_diagnostic_item = "writeln_macro"]
 #[allow_internal_unstable(format_args_nl)]
 macro_rules! writeln {
     ($dst:expr $(,)?) => {
@@ -808,7 +719,7 @@ macro_rules! writeln {
 #[rustc_builtin_macro(unreachable)]
 #[allow_internal_unstable(edition_panic)]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "unreachable_macro")]
+#[rustc_diagnostic_item = "unreachable_macro"]
 macro_rules! unreachable {
     // Expands to either `$crate::panic::unreachable_2015` or `$crate::panic::unreachable_2021`
     // depending on the edition of the caller.
@@ -893,7 +804,7 @@ macro_rules! unreachable {
 /// ```
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "unimplemented_macro")]
+#[rustc_diagnostic_item = "unimplemented_macro"]
 #[allow_internal_unstable(panic_internals)]
 macro_rules! unimplemented {
     () => {
@@ -973,7 +884,7 @@ macro_rules! unimplemented {
 /// ```
 #[macro_export]
 #[stable(feature = "todo_macro", since = "1.40.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "todo_macro")]
+#[rustc_diagnostic_item = "todo_macro"]
 #[allow_internal_unstable(panic_internals)]
 macro_rules! todo {
     () => {
@@ -1085,7 +996,7 @@ pub(crate) mod builtin {
     /// and cannot be stored for later use.
     /// This is a known limitation, see [#92698](https://github.com/rust-lang/rust/issues/92698).
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "format_args_macro")]
+    #[rustc_diagnostic_item = "format_args_macro"]
     #[allow_internal_unsafe]
     #[allow_internal_unstable(fmt_internals)]
     #[rustc_builtin_macro]
@@ -1226,6 +1137,10 @@ pub(crate) mod builtin {
         feature = "concat_idents",
         issue = "29599",
         reason = "`concat_idents` is not stable enough for use and is subject to change"
+    )]
+    #[deprecated(
+        since = "1.88.0",
+        note = "use `${concat(...)}` with the `macro_metavar_expr_concat` feature instead"
     )]
     #[rustc_builtin_macro]
     #[macro_export]
@@ -1432,7 +1347,7 @@ pub(crate) mod builtin {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_builtin_macro]
     #[macro_export]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "include_str_macro")]
+    #[rustc_diagnostic_item = "include_str_macro"]
     macro_rules! include_str {
         ($file:expr $(,)?) => {{ /* compiler built-in */ }};
     }
@@ -1472,7 +1387,7 @@ pub(crate) mod builtin {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_builtin_macro]
     #[macro_export]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "include_bytes_macro")]
+    #[rustc_diagnostic_item = "include_bytes_macro"]
     macro_rules! include_bytes {
         ($file:expr $(,)?) => {{ /* compiler built-in */ }};
     }
@@ -1746,7 +1661,6 @@ pub(crate) mod builtin {
     #[unstable(
         feature = "test",
         issue = "50297",
-        soft,
         reason = "`bench` is a part of custom test frameworks which are unstable"
     )]
     #[allow_internal_unstable(test, rustc_attrs, coverage_attribute)]
@@ -1782,7 +1696,6 @@ pub(crate) mod builtin {
     /// The attribute carries an argument token-tree which is
     /// eventually parsed as a unary closure expression that is
     /// invoked on a reference to the return value.
-    #[cfg(not(bootstrap))]
     #[unstable(feature = "contracts", issue = "128044")]
     #[allow_internal_unstable(contracts_internals)]
     #[rustc_builtin_macro]
@@ -1795,7 +1708,6 @@ pub(crate) mod builtin {
     /// The attribute carries an argument token-tree which is
     /// eventually parsed as an boolean expression with access to the
     /// function's formal parameters
-    #[cfg(not(bootstrap))]
     #[unstable(feature = "contracts", issue = "128044")]
     #[allow_internal_unstable(contracts_internals)]
     #[rustc_builtin_macro]
@@ -1832,6 +1744,20 @@ pub(crate) mod builtin {
     )]
     #[rustc_builtin_macro]
     pub macro cfg_eval($($tt:tt)*) {
+        /* compiler built-in */
+    }
+
+    /// Provide a list of type aliases and other opaque-type-containing type definitions
+    /// to an item with a body. This list will be used in that body to define opaque
+    /// types' hidden types.
+    /// Can only be applied to things that have bodies.
+    #[unstable(
+        feature = "type_alias_impl_trait",
+        issue = "63063",
+        reason = "`type_alias_impl_trait` has open design concerns"
+    )]
+    #[rustc_builtin_macro]
+    pub macro define_opaque($($tt:tt)*) {
         /* compiler built-in */
     }
 

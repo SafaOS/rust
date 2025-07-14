@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::path::Path;
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::{io, iter, slice};
 
@@ -27,8 +28,9 @@ use crate::back::write::{
 use crate::errors::{
     DynamicLinkingWithLTO, LlvmError, LtoBitcodeFromRlib, LtoDisallowed, LtoDylib, LtoProcMacro,
 };
+use crate::llvm::AttributePlace::Function;
 use crate::llvm::{self, build_string};
-use crate::{LlvmCodegenBackend, ModuleLlvm};
+use crate::{LlvmCodegenBackend, ModuleLlvm, SimpleCx, attributes};
 
 /// We keep track of the computed LTO cache keys from the previous
 /// session to determine which CGUs we can reuse.
@@ -40,7 +42,8 @@ fn crate_type_allows_lto(crate_type: CrateType) -> bool {
         | CrateType::Dylib
         | CrateType::Staticlib
         | CrateType::Cdylib
-        | CrateType::ProcMacro => true,
+        | CrateType::ProcMacro
+        | CrateType::Sdylib => true,
         CrateType::Rlib => false,
     }
 }
@@ -305,11 +308,8 @@ fn fat_lto(
             assert!(!serialized_modules.is_empty(), "must have at least one serialized module");
             let (buffer, name) = serialized_modules.remove(0);
             info!("no in-memory regular modules to choose from, parsing {:?}", name);
-            ModuleCodegen {
-                module_llvm: ModuleLlvm::parse(cgcx, &name, buffer.data(), dcx)?,
-                name: name.into_string().unwrap(),
-                kind: ModuleKind::Regular,
-            }
+            let llvm_module = ModuleLlvm::parse(cgcx, &name, buffer.data(), dcx)?;
+            ModuleCodegen::new_regular(name.into_string().unwrap(), llvm_module)
         }
     };
     {
@@ -362,8 +362,8 @@ fn fat_lto(
                 ptr as *const *const libc::c_char,
                 symbols_below_threshold.len() as libc::size_t,
             );
-            save_temp_bitcode(cgcx, &module, "lto.after-restriction");
         }
+        save_temp_bitcode(cgcx, &module, "lto.after-restriction");
     }
 
     Ok(LtoModuleCodegen::Fat(module))
@@ -586,6 +586,48 @@ fn thin_lto(
     }
 }
 
+fn enable_autodiff_settings(ad: &[config::AutoDiff]) {
+    for &val in ad {
+        // We intentionally don't use a wildcard, to not forget handling anything new.
+        match val {
+            config::AutoDiff::PrintPerf => {
+                llvm::set_print_perf(true);
+            }
+            config::AutoDiff::PrintAA => {
+                llvm::set_print_activity(true);
+            }
+            config::AutoDiff::PrintTA => {
+                llvm::set_print_type(true);
+            }
+            config::AutoDiff::Inline => {
+                llvm::set_inline(true);
+            }
+            config::AutoDiff::LooseTypes => {
+                llvm::set_loose_types(true);
+            }
+            config::AutoDiff::PrintSteps => {
+                llvm::set_print(true);
+            }
+            // We handle this in the PassWrapper.cpp
+            config::AutoDiff::PrintPasses => {}
+            // We handle this in the PassWrapper.cpp
+            config::AutoDiff::PrintModBefore => {}
+            // We handle this in the PassWrapper.cpp
+            config::AutoDiff::PrintModAfter => {}
+            // We handle this in the PassWrapper.cpp
+            config::AutoDiff::PrintModFinal => {}
+            // This is required and already checked
+            config::AutoDiff::Enable => {}
+            // We handle this below
+            config::AutoDiff::NoPostopt => {}
+        }
+    }
+    // This helps with handling enums for now.
+    llvm::set_strict_aliasing(false);
+    // FIXME(ZuseZ4): Test this, since it was added a long time ago.
+    llvm::set_rust_rules(true);
+}
+
 pub(crate) fn run_pass_manager(
     cgcx: &CodegenContext<LlvmCodegenBackend>,
     dcx: DiagCtxtHandle<'_>,
@@ -604,34 +646,68 @@ pub(crate) fn run_pass_manager(
     let opt_stage = if thin { llvm::OptStage::ThinLTO } else { llvm::OptStage::FatLTO };
     let opt_level = config.opt_level.unwrap_or(config::OptLevel::No);
 
-    // If this rustc version was build with enzyme/autodiff enabled, and if users applied the
-    // `#[autodiff]` macro at least once, then we will later call llvm_optimize a second time.
-    debug!("running llvm pm opt pipeline");
-    unsafe {
-        write::llvm_optimize(
-            cgcx,
-            dcx,
-            module,
-            config,
-            opt_level,
-            opt_stage,
-            write::AutodiffStage::DuringAD,
-        )?;
+    // The PostAD behavior is the same that we would have if no autodiff was used.
+    // It will run the default optimization pipeline. If AD is enabled we select
+    // the DuringAD stage, which will disable vectorization and loop unrolling, and
+    // schedule two autodiff optimization + differentiation passes.
+    // We then run the llvm_optimize function a second time, to optimize the code which we generated
+    // in the enzyme differentiation pass.
+    let enable_ad = config.autodiff.contains(&config::AutoDiff::Enable);
+    let stage = if thin {
+        write::AutodiffStage::PreAD
+    } else {
+        if enable_ad { write::AutodiffStage::DuringAD } else { write::AutodiffStage::PostAD }
+    };
+
+    if enable_ad {
+        enable_autodiff_settings(&config.autodiff);
     }
-    // FIXME(ZuseZ4): Make this more granular
-    if cfg!(llvm_enzyme) && !thin {
-        unsafe {
-            write::llvm_optimize(
-                cgcx,
-                dcx,
-                module,
-                config,
-                opt_level,
-                llvm::OptStage::FatLTO,
-                write::AutodiffStage::PostAD,
-            )?;
+
+    unsafe {
+        write::llvm_optimize(cgcx, dcx, module, None, config, opt_level, opt_stage, stage)?;
+    }
+
+    if cfg!(llvm_enzyme) && enable_ad && !thin {
+        let cx =
+            SimpleCx::new(module.module_llvm.llmod(), &module.module_llvm.llcx, cgcx.pointer_size);
+
+        for function in cx.get_functions() {
+            let enzyme_marker = "enzyme_marker";
+            if attributes::has_string_attr(function, enzyme_marker) {
+                // Sanity check: Ensure 'noinline' is present before replacing it.
+                assert!(
+                    !attributes::has_attr(function, Function, llvm::AttributeKind::NoInline),
+                    "Expected __enzyme function to have 'noinline' before adding 'alwaysinline'"
+                );
+
+                attributes::remove_from_llfn(function, Function, llvm::AttributeKind::NoInline);
+                attributes::remove_string_attr_from_llfn(function, enzyme_marker);
+
+                assert!(
+                    !attributes::has_string_attr(function, enzyme_marker),
+                    "Expected function to not have 'enzyme_marker'"
+                );
+
+                let always_inline = llvm::AttributeKind::AlwaysInline.create_attr(cx.llcx);
+                attributes::apply_to_llfn(function, Function, &[always_inline]);
+            }
+        }
+
+        let opt_stage = llvm::OptStage::FatLTO;
+        let stage = write::AutodiffStage::PostAD;
+        if !config.autodiff.contains(&config::AutoDiff::NoPostopt) {
+            unsafe {
+                write::llvm_optimize(cgcx, dcx, module, None, config, opt_level, opt_stage, stage)?;
+            }
+        }
+
+        // This is the final IR, so people should be able to inspect the optimized autodiff output,
+        // for manual inspection.
+        if config.autodiff.contains(&config::AutoDiff::PrintModFinal) {
+            unsafe { llvm::LLVMDumpModule(module.module_llvm.llmod()) };
         }
     }
+
     debug!("lto done");
     Ok(())
 }
@@ -690,6 +766,11 @@ impl ThinBuffer {
             ThinBuffer(buffer)
         }
     }
+
+    pub(crate) unsafe fn from_raw_ptr(ptr: *mut llvm::ThinLTOBuffer) -> ThinBuffer {
+        let mut ptr = NonNull::new(ptr).unwrap();
+        ThinBuffer(unsafe { ptr.as_mut() })
+    }
 }
 
 impl ThinBufferMethods for ThinBuffer {
@@ -733,11 +814,11 @@ pub(crate) unsafe fn optimize_thin_module(
     // crates but for locally codegened modules we may be able to reuse
     // that LLVM Context and Module.
     let module_llvm = ModuleLlvm::parse(cgcx, module_name, thin_module.data(), dcx)?;
-    let mut module = ModuleCodegen {
-        module_llvm,
-        name: thin_module.name().to_string(),
-        kind: ModuleKind::Regular,
-    };
+    let mut module = ModuleCodegen::new_regular(thin_module.name(), module_llvm);
+    // Given that the newly created module lacks a thinlto buffer for embedding, we need to re-add it here.
+    if cgcx.config(ModuleKind::Regular).embed_bitcode() {
+        module.thin_lto_buffer = Some(thin_module.data().to_vec());
+    }
     {
         let target = &*module.module_llvm.tm;
         let llmod = module.module_llvm.llmod();
@@ -754,7 +835,9 @@ pub(crate) unsafe fn optimize_thin_module(
         {
             let _timer =
                 cgcx.prof.generic_activity_with_arg("LLVM_thin_lto_rename", thin_module.name());
-            unsafe { llvm::LLVMRustPrepareThinLTORename(thin_module.shared.data.0, llmod, target) };
+            unsafe {
+                llvm::LLVMRustPrepareThinLTORename(thin_module.shared.data.0, llmod, target.raw())
+            };
             save_temp_bitcode(cgcx, &module, "thin-lto-after-rename");
         }
 
@@ -784,7 +867,7 @@ pub(crate) unsafe fn optimize_thin_module(
             let _timer =
                 cgcx.prof.generic_activity_with_arg("LLVM_thin_lto_import", thin_module.name());
             if unsafe {
-                !llvm::LLVMRustPrepareThinLTOImport(thin_module.shared.data.0, llmod, target)
+                !llvm::LLVMRustPrepareThinLTOImport(thin_module.shared.data.0, llmod, target.raw())
             } {
                 return Err(write::llvm_err(dcx, LlvmError::PrepareThinLtoModule));
             }

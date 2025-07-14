@@ -9,15 +9,14 @@ use chalk_ir::cast::Cast;
 use hir_def::lang_item::LangItem;
 use hir_expand::name::Name;
 use intern::sym;
-use limit::Limit;
 use triomphe::Arc;
 
 use crate::{
-    db::HirDatabase, infer::unify::InferenceTable, Canonical, Goal, Interner, ProjectionTyExt,
-    TraitEnvironment, Ty, TyBuilder, TyKind,
+    Canonical, Goal, Interner, ProjectionTyExt, TraitEnvironment, Ty, TyBuilder, TyKind,
+    db::HirDatabase, infer::unify::InferenceTable,
 };
 
-static AUTODEREF_RECURSION_LIMIT: Limit = Limit::new(20);
+const AUTODEREF_RECURSION_LIMIT: usize = 20;
 
 #[derive(Debug)]
 pub(crate) enum AutoderefKind {
@@ -140,7 +139,7 @@ impl<T: TrackAutoderefSteps> Iterator for Autoderef<'_, '_, T> {
             return Some((self.ty.clone(), 0));
         }
 
-        if AUTODEREF_RECURSION_LIMIT.check(self.steps.len() + 1).is_err() {
+        if self.steps.len() > AUTODEREF_RECURSION_LIMIT {
             return None;
         }
 
@@ -199,20 +198,17 @@ pub(crate) fn deref_by_trait(
         // blanked impl on `Deref`.
         #[expect(clippy::overly_complex_bool_expr)]
         if use_receiver_trait && false {
-            if let Some(receiver) =
-                db.lang_item(table.trait_env.krate, LangItem::Receiver).and_then(|l| l.as_trait())
-            {
+            if let Some(receiver) = LangItem::Receiver.resolve_trait(db, table.trait_env.krate) {
                 return Some(receiver);
             }
         }
         // Old rustc versions might not have `Receiver` trait.
         // Fallback to `Deref` if they don't
-        db.lang_item(table.trait_env.krate, LangItem::Deref).and_then(|l| l.as_trait())
+        LangItem::Deref.resolve_trait(db, table.trait_env.krate)
     };
     let trait_id = trait_id()?;
-    let target = db
-        .trait_data(trait_id)
-        .associated_type_by_name(&Name::new_symbol_root(sym::Target.clone()))?;
+    let target =
+        db.trait_items(trait_id).associated_type_by_name(&Name::new_symbol_root(sym::Target))?;
 
     let projection = {
         let b = TyBuilder::subst_for_def(db, trait_id, None);

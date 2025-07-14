@@ -6,28 +6,29 @@ mod tests;
 mod intra_doc_links;
 
 use pulldown_cmark::{BrokenLink, CowStr, Event, InlineStr, LinkType, Options, Parser, Tag};
-use pulldown_cmark_to_cmark::{cmark_resume_with_options, Options as CMarkOptions};
+use pulldown_cmark_to_cmark::{Options as CMarkOptions, cmark_resume_with_options};
 use stdx::format_to;
 use url::Url;
 
-use hir::{db::HirDatabase, sym, Adt, AsAssocItem, AssocItem, AssocItemContainer, HasAttrs};
+use hir::{Adt, AsAssocItem, AssocItem, AssocItemContainer, HasAttrs, db::HirDatabase, sym};
 use ide_db::{
-    base_db::{CrateOrigin, LangCrateOrigin, ReleaseChannel, SourceDatabase},
-    defs::{Definition, NameClass, NameRefClass},
-    documentation::{docs_with_rangemap, Documentation, HasDocs},
-    helpers::pick_best_token,
     RootDatabase,
+    base_db::{CrateOrigin, LangCrateOrigin, ReleaseChannel, RootQueryDb},
+    defs::{Definition, NameClass, NameRefClass},
+    documentation::{Documentation, HasDocs, docs_with_rangemap},
+    helpers::pick_best_token,
 };
 use syntax::{
-    ast::{self, IsString},
-    match_ast, AstNode, AstToken,
+    AstNode, AstToken,
     SyntaxKind::*,
-    SyntaxNode, SyntaxToken, TextRange, TextSize, T,
+    SyntaxNode, SyntaxToken, T, TextRange, TextSize,
+    ast::{self, IsString},
+    match_ast,
 };
 
 use crate::{
-    doc_links::intra_doc_links::{parse_intra_doc_link, strip_prefixes_suffixes},
     FilePosition, Semantics,
+    doc_links::intra_doc_links::{parse_intra_doc_link, strip_prefixes_suffixes},
 };
 
 /// Web and local links to an item's documentation.
@@ -379,13 +380,15 @@ fn rewrite_intra_doc_link(
     let resolved = resolve_doc_path_for_def(db, def, link, ns)?;
     let mut url = get_doc_base_urls(db, resolved, None, None).0?;
 
-    let (_, file, _) = filename_and_frag_for_def(db, resolved)?;
+    let (_, file, frag) = filename_and_frag_for_def(db, resolved)?;
     if let Some(path) = mod_path_of_def(db, resolved) {
         url = url.join(&path).ok()?;
     }
 
+    let frag = anchor.or(frag.as_deref());
+
     url = url.join(&file).ok()?;
-    url.set_fragment(anchor);
+    url.set_fragment(frag);
 
     Some((url.into(), strip_prefixes_suffixes(title).to_owned()))
 }
@@ -502,9 +505,7 @@ fn get_doc_base_urls(
 
     let Some(krate) = krate else { return Default::default() };
     let Some(display_name) = krate.display_name(db) else { return Default::default() };
-    let crate_data = &db.crate_graph()[krate.into()];
-
-    let (web_base, local_base) = match &crate_data.origin {
+    let (web_base, local_base) = match krate.origin(db) {
         // std and co do not specify `html_root_url` any longer so we gotta handwrite this ourself.
         // FIXME: Use the toolchains channel instead of nightly
         CrateOrigin::Lang(
@@ -596,9 +597,9 @@ fn filename_and_frag_for_def(
         Definition::Module(m) => match m.name(db) {
             // `#[doc(keyword = "...")]` is internal used only by rust compiler
             Some(name) => {
-                match m.attrs(db).by_key(&sym::doc).find_string_value_in_tt(&sym::keyword) {
+                match m.attrs(db).by_key(sym::doc).find_string_value_in_tt(sym::keyword) {
                     Some(kw) => {
-                        format!("keyword.{}.html", kw)
+                        format!("keyword.{kw}.html")
                     }
                     None => format!("{}/index.html", name.as_str()),
                 }
@@ -621,26 +622,25 @@ fn filename_and_frag_for_def(
             format!("fn.{}.html", f.name(db).as_str())
         }
         Definition::Variant(ev) => {
-            format!(
-                "enum.{}.html#variant.{}",
-                ev.parent_enum(db).name(db).as_str(),
-                ev.name(db).as_str()
-            )
+            let def = Definition::Adt(ev.parent_enum(db).into());
+            let (_, file, _) = filename_and_frag_for_def(db, def)?;
+            return Some((def, file, Some(format!("variant.{}", ev.name(db).as_str()))));
         }
         Definition::Const(c) => {
-            format!("const.{}.html", c.name(db)?.as_str())
+            format!("constant.{}.html", c.name(db)?.as_str())
         }
         Definition::Static(s) => {
             format!("static.{}.html", s.name(db).as_str())
         }
         Definition::Macro(mac) => match mac.kind(db) {
             hir::MacroKind::Declarative
-            | hir::MacroKind::BuiltIn
+            | hir::MacroKind::AttrBuiltIn
+            | hir::MacroKind::DeclarativeBuiltIn
             | hir::MacroKind::Attr
             | hir::MacroKind::ProcMacro => {
                 format!("macro.{}.html", mac.name(db).as_str())
             }
-            hir::MacroKind::Derive => {
+            hir::MacroKind::Derive | hir::MacroKind::DeriveBuiltIn => {
                 format!("derive.{}.html", mac.name(db).as_str())
             }
         },

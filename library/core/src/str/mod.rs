@@ -114,7 +114,6 @@ fn slice_error_fail_rt(s: &str, begin: usize, end: usize) -> ! {
     );
 }
 
-#[cfg(not(test))]
 impl str {
     /// Returns the length of `self`.
     ///
@@ -134,7 +133,8 @@ impl str {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_str_len", since = "1.39.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_len")]
+    #[rustc_diagnostic_item = "str_len"]
+    #[cfg_attr(not(bootstrap), rustc_no_implicit_autorefs)]
     #[must_use]
     #[inline]
     pub const fn len(&self) -> usize {
@@ -154,6 +154,7 @@ impl str {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_str_is_empty", since = "1.39.0")]
+    #[cfg_attr(not(bootstrap), rustc_no_implicit_autorefs)]
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
@@ -198,8 +199,6 @@ impl str {
     /// Basic usage:
     ///
     /// ```
-    /// use std::str;
-    ///
     /// // some bytes, in a vector
     /// let sparkle_heart = vec![240, 159, 146, 150];
     ///
@@ -207,14 +206,12 @@ impl str {
     /// let sparkle_heart = str::from_utf8(&sparkle_heart)?;
     ///
     /// assert_eq!("💖", sparkle_heart);
-    /// # Ok::<_, str::Utf8Error>(())
+    /// # Ok::<_, std::str::Utf8Error>(())
     /// ```
     ///
     /// Incorrect bytes:
     ///
     /// ```
-    /// use std::str;
-    ///
     /// // some invalid bytes, in a vector
     /// let sparkle_heart = vec![0, 159, 146, 150];
     ///
@@ -227,8 +224,6 @@ impl str {
     /// A "stack allocated string":
     ///
     /// ```
-    /// use std::str;
-    ///
     /// // some bytes, in a stack-allocated array
     /// let sparkle_heart = [240, 159, 146, 150];
     ///
@@ -237,7 +232,9 @@ impl str {
     ///
     /// assert_eq!("💖", sparkle_heart);
     /// ```
-    #[unstable(feature = "inherent_str_constructors", issue = "131114")]
+    #[stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_const_stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_diagnostic_item = "str_inherent_from_utf8"]
     pub const fn from_utf8(v: &[u8]) -> Result<&str, Utf8Error> {
         converts::from_utf8(v)
     }
@@ -249,8 +246,6 @@ impl str {
     /// Basic usage:
     ///
     /// ```
-    /// use std::str;
-    ///
     /// // "Hello, Rust!" as a mutable vector
     /// let mut hellorust = vec![72, 101, 108, 108, 111, 44, 32, 82, 117, 115, 116, 33];
     ///
@@ -263,8 +258,6 @@ impl str {
     /// Incorrect bytes:
     ///
     /// ```
-    /// use std::str;
-    ///
     /// // Some invalid bytes in a mutable vector
     /// let mut invalid = vec![128, 223];
     ///
@@ -272,8 +265,9 @@ impl str {
     /// ```
     /// See the docs for [`Utf8Error`] for more details on the kinds of
     /// errors that can be returned.
-    #[unstable(feature = "inherent_str_constructors", issue = "131114")]
-    #[rustc_const_unstable(feature = "const_str_from_utf8", issue = "91006")]
+    #[stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_const_stable(feature = "const_str_from_utf8", since = "1.87.0")]
+    #[rustc_diagnostic_item = "str_inherent_from_utf8_mut"]
     pub const fn from_utf8_mut(v: &mut [u8]) -> Result<&mut str, Utf8Error> {
         converts::from_utf8_mut(v)
     }
@@ -292,8 +286,6 @@ impl str {
     /// Basic usage:
     ///
     /// ```
-    /// use std::str;
-    ///
     /// // some bytes, in a vector
     /// let sparkle_heart = vec![240, 159, 146, 150];
     ///
@@ -305,7 +297,9 @@ impl str {
     /// ```
     #[inline]
     #[must_use]
-    #[unstable(feature = "inherent_str_constructors", issue = "131114")]
+    #[stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_const_stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_diagnostic_item = "str_inherent_from_utf8_unchecked"]
     pub const unsafe fn from_utf8_unchecked(v: &[u8]) -> &str {
         // SAFETY: converts::from_utf8_unchecked has the same safety requirements as this function.
         unsafe { converts::from_utf8_unchecked(v) }
@@ -314,15 +308,13 @@ impl str {
     /// Converts a slice of bytes to a string slice without checking
     /// that the string contains valid UTF-8; mutable version.
     ///
-    /// See the immutable version, [`from_utf8_unchecked()`] for more information.
+    /// See the immutable version, [`from_utf8_unchecked()`] for documentation and safety requirements.
     ///
     /// # Examples
     ///
     /// Basic usage:
     ///
     /// ```
-    /// use std::str;
-    ///
     /// let mut heart = vec![240, 159, 146, 150];
     /// let heart = unsafe { str::from_utf8_unchecked_mut(&mut heart) };
     ///
@@ -330,7 +322,9 @@ impl str {
     /// ```
     #[inline]
     #[must_use]
-    #[unstable(feature = "inherent_str_constructors", issue = "131114")]
+    #[stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_const_stable(feature = "inherent_str_constructors", since = "1.87.0")]
+    #[rustc_diagnostic_item = "str_inherent_from_utf8_unchecked_mut"]
     pub const unsafe fn from_utf8_unchecked_mut(v: &mut [u8]) -> &mut str {
         // SAFETY: converts::from_utf8_unchecked_mut has the same safety requirements as this function.
         unsafe { converts::from_utf8_unchecked_mut(v) }
@@ -1036,7 +1030,7 @@ impl str {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_chars")]
+    #[rustc_diagnostic_item = "str_chars"]
     pub fn chars(&self) -> Chars<'_> {
         Chars { iter: self.as_bytes().iter() }
     }
@@ -1167,7 +1161,7 @@ impl str {
     #[must_use = "this returns the split string as an iterator, \
                   without modifying the original"]
     #[stable(feature = "split_whitespace", since = "1.1.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_split_whitespace")]
+    #[rustc_diagnostic_item = "str_split_whitespace"]
     #[inline]
     pub fn split_whitespace(&self) -> SplitWhitespace<'_> {
         SplitWhitespace { inner: self.split(IsWhitespace).filter(IsNotEmpty) }
@@ -1362,7 +1356,7 @@ impl str {
     /// assert!(bananas.starts_with(&['a', 'b', 'c', 'd']));
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_starts_with")]
+    #[rustc_diagnostic_item = "str_starts_with"]
     pub fn starts_with<P: Pattern>(&self, pat: P) -> bool {
         pat.is_prefix_of(self)
     }
@@ -1387,7 +1381,7 @@ impl str {
     /// assert!(!bananas.ends_with("nana"));
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_ends_with")]
+    #[rustc_diagnostic_item = "str_ends_with"]
     pub fn ends_with<P: Pattern>(&self, pat: P) -> bool
     where
         for<'a> P::Searcher<'a>: ReverseSearcher<'a>,
@@ -2121,9 +2115,9 @@ impl str {
     #[must_use = "this returns the trimmed string as a slice, \
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_trim")]
+    #[rustc_diagnostic_item = "str_trim"]
     pub fn trim(&self) -> &str {
-        self.trim_matches(|c: char| c.is_whitespace())
+        self.trim_matches(char::is_whitespace)
     }
 
     /// Returns a string slice with leading whitespace removed.
@@ -2160,9 +2154,9 @@ impl str {
     #[must_use = "this returns the trimmed string as a new slice, \
                   without modifying the original"]
     #[stable(feature = "trim_direction", since = "1.30.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_trim_start")]
+    #[rustc_diagnostic_item = "str_trim_start"]
     pub fn trim_start(&self) -> &str {
-        self.trim_start_matches(|c: char| c.is_whitespace())
+        self.trim_start_matches(char::is_whitespace)
     }
 
     /// Returns a string slice with trailing whitespace removed.
@@ -2199,9 +2193,9 @@ impl str {
     #[must_use = "this returns the trimmed string as a new slice, \
                   without modifying the original"]
     #[stable(feature = "trim_direction", since = "1.30.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "str_trim_end")]
+    #[rustc_diagnostic_item = "str_trim_end"]
     pub fn trim_end(&self) -> &str {
-        self.trim_end_matches(|c: char| c.is_whitespace())
+        self.trim_end_matches(char::is_whitespace)
     }
 
     /// Returns a string slice with leading whitespace removed.

@@ -92,8 +92,11 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for ParseTargetMachineConfig<'_> {
 
 #[derive(Diagnostic)]
 #[diag(codegen_llvm_autodiff_without_lto)]
-#[note]
 pub(crate) struct AutoDiffWithoutLTO;
+
+#[derive(Diagnostic)]
+#[diag(codegen_llvm_autodiff_without_enable)]
+pub(crate) struct AutoDiffWithoutEnable;
 
 #[derive(Diagnostic)]
 #[diag(codegen_llvm_lto_disallowed)]
@@ -214,3 +217,7 @@ pub(crate) struct MismatchedDataLayout<'a> {
 pub(crate) struct FixedX18InvalidArch<'a> {
     pub arch: &'a str,
 }
+
+#[derive(Diagnostic)]
+#[diag(codegen_llvm_sanitizer_kcfi_arity_requires_llvm_21_0_0)]
+pub(crate) struct SanitizerKcfiArityRequiresLLVM2100;

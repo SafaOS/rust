@@ -150,8 +150,15 @@ trait Foo {
 
 impl Foo for LineComment {
     /// comment on assoc item
+    //~^ empty_line_after_doc_comments
 
     fn bar() {}
 }
+
+//~v empty_line_after_doc_comments
+/// Docs for this item.
+// fn some_item() {}
+
+impl LineComment {} // or any other nameless item kind
 
 fn main() {}

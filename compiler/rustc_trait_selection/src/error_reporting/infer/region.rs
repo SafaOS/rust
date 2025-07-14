@@ -2,7 +2,7 @@ use std::iter;
 
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_errors::{
-    Applicability, Diag, E0309, E0310, E0311, E0495, Subdiagnostic, struct_span_code_err,
+    Applicability, Diag, E0309, E0310, E0311, E0803, Subdiagnostic, struct_span_code_err,
 };
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
@@ -11,9 +11,10 @@ use rustc_hir::{self as hir, ParamName};
 use rustc_middle::bug;
 use rustc_middle::traits::ObligationCauseCode;
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::{self, IsSuggestable, Region, Ty, TyCtxt, TypeVisitableExt as _};
+use rustc_middle::ty::{
+    self, IsSuggestable, Region, Ty, TyCtxt, TypeVisitableExt as _, Upcast as _,
+};
 use rustc_span::{BytePos, ErrorGuaranteed, Span, Symbol, kw};
-use rustc_type_ir::Upcast as _;
 use tracing::{debug, instrument};
 
 use super::ObligationCauseAsDiagArg;
@@ -299,7 +300,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     self.tcx.param_env(generic_param_scope),
                     terr,
                 );
-                match (*sub, *sup) {
+                match (sub.kind(), sup.kind()) {
                     (ty::RePlaceholder(_), ty::RePlaceholder(_)) => {}
                     (ty::RePlaceholder(_), _) => {
                         note_and_explain_region(
@@ -391,7 +392,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 })
             }
             infer::RelateParamBound(span, ty, opt_span) => {
-                let prefix = match *sub {
+                let prefix = match sub.kind() {
                     ty::ReStatic => note_and_explain::PrefixKind::TypeSatisfy,
                     _ => note_and_explain::PrefixKind::TypeOutlive,
                 };
@@ -487,7 +488,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     &format!("`{sup}: {sub}`"),
                 );
                 // We should only suggest rewriting the `where` clause if the predicate is within that `where` clause
-                if let Some(generics) = self.tcx.hir().get_generics(impl_item_def_id)
+                if let Some(generics) = self.tcx.hir_get_generics(impl_item_def_id)
                     && generics.where_clause_span.contains(span)
                 {
                     self.suggest_copy_trait_method_bounds(
@@ -590,7 +591,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             return;
         };
 
-        let Some(generics) = self.tcx.hir().get_generics(impl_item_def_id) else {
+        let Some(generics) = self.tcx.hir_get_generics(impl_item_def_id) else {
             return;
         };
 
@@ -707,7 +708,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 ty::Projection | ty::Inherent => {
                     format!("the associated type `{p}`")
                 }
-                ty::Weak => format!("the type alias `{p}`"),
+                ty::Free => format!("the type alias `{p}`"),
                 ty::Opaque => format!("the opaque type `{p}`"),
             },
         };
@@ -763,7 +764,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     // Get the `hir::Param` to verify whether it already has any bounds.
                     // We do this to avoid suggesting code that ends up as `T: 'a'b`,
                     // instead we suggest `T: 'a + 'b` in that case.
-                    let hir_generics = self.tcx.hir().get_generics(scope).unwrap();
+                    let hir_generics = self.tcx.hir_get_generics(scope).unwrap();
                     let sugg_span = match hir_generics.bounds_span_for_suggestions(def_id) {
                         Some((span, open_paren_sp)) => Some((span, true, open_paren_sp)),
                         // If `param` corresponds to `Self`, no usable suggestion span.
@@ -822,7 +823,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             {
                 // The lifetime found in the `impl` is longer than the one on the RPITIT.
                 // Do not suggest `<Type as Trait>::{opaque}: 'static`.
-            } else if let Some(generics) = self.tcx.hir().get_generics(suggestion_scope) {
+            } else if let Some(generics) = self.tcx.hir_get_generics(suggestion_scope) {
                 let pred = format!("{bound_kind}: {lt_name}");
                 let suggestion = format!("{} {}", generics.add_where_or_trailing_comma(), pred);
                 suggs.push((generics.tail_span_for_predicate_suggestion(), suggestion))
@@ -850,14 +851,14 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         add_lt_suggs: &mut Vec<(Span, String)>,
     ) -> String {
         struct LifetimeReplaceVisitor<'a> {
-            needle: hir::LifetimeName,
+            needle: hir::LifetimeKind,
             new_lt: &'a str,
             add_lt_suggs: &'a mut Vec<(Span, String)>,
         }
 
         impl<'hir> hir::intravisit::Visitor<'hir> for LifetimeReplaceVisitor<'_> {
             fn visit_lifetime(&mut self, lt: &'hir hir::Lifetime) {
-                if lt.res == self.needle {
+                if lt.kind == self.needle {
                     self.add_lt_suggs.push(lt.suggestion(self.new_lt));
                 }
             }
@@ -894,7 +895,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         };
 
         let mut visitor = LifetimeReplaceVisitor {
-            needle: hir::LifetimeName::Param(lifetime_def_id),
+            needle: hir::LifetimeKind::Param(lifetime_def_id),
             add_lt_suggs,
             new_lt: &new_lt,
         };
@@ -907,7 +908,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             hir::OwnerNode::Synthetic => unreachable!(),
         }
 
-        let ast_generics = self.tcx.hir().get_generics(lifetime_scope).unwrap();
+        let ast_generics = self.tcx.hir_get_generics(lifetime_scope).unwrap();
         let sugg = ast_generics
             .span_for_lifetime_suggestion()
             .map(|span| (span, format!("{new_lt}, ")))
@@ -967,7 +968,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                 format!("...so that the {}", sup_trace.cause.as_requirement_str()),
             );
 
-            err.note_expected_found(&"", sup_expected, &"", sup_found);
+            err.note_expected_found("", sup_expected, "", sup_found);
             return if sub_region.is_error() | sup_region.is_error() {
                 err.delay_as_bug()
             } else {
@@ -1017,13 +1018,13 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
             infer::BoundRegion(_, br, infer::AssocTypeProjection(def_id)) => format!(
                 " for lifetime parameter {}in trait containing associated type `{}`",
                 br_string(br),
-                self.tcx.associated_item(def_id).name
+                self.tcx.associated_item(def_id).name()
             ),
             infer::RegionParameterDefinition(_, name) => {
                 format!(" for lifetime parameter `{name}`")
             }
             infer::UpvarRegion(ref upvar_id, _) => {
-                let var_name = self.tcx.hir().name(upvar_id.var_path.hir_id);
+                let var_name = self.tcx.hir_name(upvar_id.var_path.hir_id);
                 format!(" for capture of `{var_name}` by closure")
             }
             infer::Nll(..) => bug!("NLL variable found in lexical phase"),
@@ -1032,7 +1033,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
         struct_span_code_err!(
             self.dcx(),
             var_origin.span(),
-            E0495,
+            E0803,
             "cannot infer an appropriate lifetime{} due to conflicting requirements",
             var_description
         )
@@ -1048,7 +1049,7 @@ pub(super) fn note_and_explain_region<'tcx>(
     suffix: &str,
     alt_span: Option<Span>,
 ) {
-    let (description, span) = match *region {
+    let (description, span) = match region.kind() {
         ty::ReEarlyParam(_) | ty::ReLateParam(_) | ty::RePlaceholder(_) | ty::ReStatic => {
             msg_span_from_named_region(tcx, generic_param_scope, region, alt_span)
         }
@@ -1085,7 +1086,7 @@ fn msg_span_from_named_region<'tcx>(
     region: ty::Region<'tcx>,
     alt_span: Option<Span>,
 ) -> (String, Option<Span>) {
-    match *region {
+    match region.kind() {
         ty::ReEarlyParam(br) => {
             let param_def_id = tcx.generics_of(generic_param_scope).region_param(br, tcx).def_id;
             let span = tcx.def_span(param_def_id);
@@ -1185,7 +1186,7 @@ pub fn unexpected_hidden_region_diagnostic<'a, 'tcx>(
     });
 
     // Explain the region we are capturing.
-    match *hidden_region {
+    match hidden_region.kind() {
         ty::ReEarlyParam(_) | ty::ReLateParam(_) | ty::ReStatic => {
             // Assuming regionck succeeded (*), we ought to always be
             // capturing *some* region from the fn header, and hence it
@@ -1382,7 +1383,7 @@ fn suggest_precise_capturing<'tcx>(
                 new_params += name_as_bounds;
             }
 
-            let Some(generics) = tcx.hir().get_generics(fn_def_id) else {
+            let Some(generics) = tcx.hir_get_generics(fn_def_id) else {
                 // This shouldn't happen, but don't ICE.
                 return;
             };

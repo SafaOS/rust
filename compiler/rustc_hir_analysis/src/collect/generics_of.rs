@@ -71,7 +71,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         | Node::Variant(_)
         | Node::Ctor(..)
         | Node::Field(_) => {
-            let parent_id = tcx.hir().get_parent_item(hir_id);
+            let parent_id = tcx.hir_get_parent_item(hir_id);
             Some(parent_id.to_def_id())
         }
         // FIXME(#43408) always enable this once `lazy_normalization` is
@@ -90,12 +90,12 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             let parent_did = if let DefKind::AnonConst = tcx.def_kind(parent_did) {
                 parent_did
             } else {
-                tcx.hir().get_parent_item(hir_id).to_def_id()
+                tcx.hir_get_parent_item(hir_id).to_def_id()
             };
             debug!(?parent_did);
 
             let mut in_param_ty = false;
-            for (_parent, node) in tcx.hir().parent_iter(hir_id) {
+            for (_parent, node) in tcx.hir_parent_iter(hir_id) {
                 if let Some(generics) = node.generics() {
                     let mut visitor = AnonConstInParamTyDetector { in_param_ty: false, ct: hir_id };
 
@@ -116,8 +116,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                 {
                     // enum variant discriminants are not allowed to use any kind of generics
                     None
-                } else if let Some(param_id) =
-                    tcx.hir().opt_const_param_default_param_def_id(hir_id)
+                } else if let Some(param_id) = tcx.hir_opt_const_param_default_param_def_id(hir_id)
                 {
                     // If the def_id we are calling generics_of on is an anon ct default i.e:
                     //
@@ -186,19 +185,9 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                     {
                         Some(parent_did)
                     }
-                    // Exclude `GlobalAsm` here which cannot have generics.
-                    Node::Expr(&Expr { kind: ExprKind::InlineAsm(asm), .. })
-                        if asm.operands.iter().any(|(op, _op_sp)| match op {
-                            hir::InlineAsmOperand::Const { anon_const }
-                            | hir::InlineAsmOperand::SymFn { anon_const } => {
-                                anon_const.hir_id == hir_id
-                            }
-                            _ => false,
-                        }) =>
-                    {
-                        Some(parent_did)
-                    }
                     Node::TyPat(_) => Some(parent_did),
+                    // Field default values inherit the ADT's generics.
+                    Node::Field(_) => Some(parent_did),
                     _ => None,
                 }
             }

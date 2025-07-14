@@ -2,12 +2,10 @@ use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
 use rustc_abi::{FieldIdx, VariantIdx};
-use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::{FxHashMap, FxIndexSet, StdEntry};
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
-use rustc_middle::mir::tcx::PlaceTy;
 use rustc_middle::mir::visit::{MutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
@@ -126,7 +124,7 @@ impl<V: Clone + HasBottom> State<V> {
     pub fn all_bottom(&self) -> bool {
         match self {
             State::Unreachable => false,
-            State::Reachable(ref values) =>
+            State::Reachable(values) =>
             {
                 #[allow(rustc::potential_query_instability)]
                 values.map.values().all(V::is_bottom)
@@ -350,7 +348,7 @@ impl<V: JoinSemiLattice + Clone> JoinSemiLattice for State<V> {
                 *self = other.clone();
                 true
             }
-            (State::Reachable(this), State::Reachable(ref other)) => this.join(other),
+            (State::Reachable(this), State::Reachable(other)) => this.join(other),
         }
     }
 }
@@ -405,6 +403,9 @@ impl<'tcx> Map<'tcx> {
         // Start by constructing the places for each bare local.
         for (local, decl) in body.local_decls.iter_enumerated() {
             if exclude.contains(local) {
+                continue;
+            }
+            if decl.ty.is_async_drop_in_place_coroutine(tcx) {
                 continue;
             }
 
@@ -677,10 +678,7 @@ impl<'tcx> Map<'tcx> {
     }
 
     /// Iterate over all direct children.
-    fn children(
-        &self,
-        parent: PlaceIndex,
-    ) -> impl Iterator<Item = PlaceIndex> + Captures<'_> + Captures<'tcx> {
+    fn children(&self, parent: PlaceIndex) -> impl Iterator<Item = PlaceIndex> {
         Children::new(self, parent)
     }
 

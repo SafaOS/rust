@@ -1,13 +1,11 @@
 //! This module resolves `mod foo;` declaration to file.
 use arrayvec::ArrayVec;
 use base_db::AnchoredPath;
-use hir_expand::{name::Name, HirFileIdExt};
-use limit::Limit;
-use span::EditionedFileId;
+use hir_expand::{EditionedFileId, name::Name};
 
-use crate::{db::DefDatabase, HirFileId};
+use crate::{HirFileId, db::DefDatabase};
 
-static MOD_DEPTH_LIMIT: Limit = Limit::new(32);
+const MOD_DEPTH_LIMIT: usize = 32;
 
 #[derive(Clone, Debug)]
 pub(super) struct ModDir {
@@ -50,7 +48,7 @@ impl ModDir {
 
     fn child(&self, dir_path: DirPath, root_non_dir_owner: bool) -> Option<ModDir> {
         let depth = self.depth + 1;
-        if MOD_DEPTH_LIMIT.check(depth as usize).is_err() {
+        if depth as usize > MOD_DEPTH_LIMIT {
             tracing::error!("MOD_DEPTH_LIMIT exceeded");
             cov_mark::hit!(circular_mods);
             return None;
@@ -78,9 +76,9 @@ impl ModDir {
             }
         };
 
-        let orig_file_id = file_id.original_file_respecting_includes(db.upcast());
+        let orig_file_id = file_id.original_file_respecting_includes(db);
         for candidate in candidate_files.iter() {
-            let path = AnchoredPath { anchor: orig_file_id.file_id(), path: candidate.as_str() };
+            let path = AnchoredPath { anchor: orig_file_id.file_id(db), path: candidate.as_str() };
             if let Some(file_id) = db.resolve_path(path) {
                 let is_mod_rs = candidate.ends_with("/mod.rs");
 
@@ -88,12 +86,12 @@ impl ModDir {
                 let dir_path = if root_dir_owner {
                     DirPath::empty()
                 } else {
-                    DirPath::new(format!("{}/", name))
+                    DirPath::new(format!("{name}/"))
                 };
                 if let Some(mod_dir) = self.child(dir_path, !root_dir_owner) {
                     return Ok((
                         // FIXME: Edition, is this rightr?
-                        EditionedFileId::new(file_id, orig_file_id.edition()),
+                        EditionedFileId::new(db, file_id, orig_file_id.edition(db)),
                         is_mod_rs,
                         mod_dir,
                     ));
@@ -135,7 +133,7 @@ impl DirPath {
     /// So this is the case which doesn't really work I think if we try to be
     /// 100% platform agnostic:
     ///
-    /// ```
+    /// ```ignore
     /// mod a {
     ///     #[path="C://sad/face"]
     ///     mod b { mod c; }

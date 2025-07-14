@@ -19,7 +19,7 @@ pub fn foo() {}
 fn test1() {
     use bar::gpriv;
     //~^ ERROR unresolved import `bar::gpriv` [E0432]
-    //~| no `gpriv` in `bar`
+    //~| NOTE no `gpriv` in `bar`
 
     // This should pass because the compiler will insert a fake name binding
     // for `gpriv`

@@ -1,14 +1,13 @@
 // tidy-alphabetical-start
 #![allow(rustc::diagnostic_outside_of_impl)]
 #![allow(rustc::untranslatable_diagnostic)]
+#![cfg_attr(bootstrap, feature(let_chains))]
 #![feature(array_windows)]
 #![feature(box_patterns)]
 #![feature(if_let_guard)]
 #![feature(iter_intersperse)]
-#![feature(let_chains)]
 #![feature(never_type)]
 #![feature(try_blocks)]
-#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 mod _match;
@@ -24,6 +23,7 @@ mod diverges;
 mod errors;
 mod expectation;
 mod expr;
+mod inline_asm;
 // Used by clippy;
 pub mod expr_use_visitor;
 mod fallback;
@@ -32,6 +32,7 @@ mod gather_locals;
 mod intrinsicck;
 mod method;
 mod op;
+mod opaque_types;
 mod pat;
 mod place_op;
 mod rvalue_scopes;
@@ -46,7 +47,6 @@ use rustc_errors::codes::*;
 use rustc_errors::{Applicability, ErrorGuaranteed, pluralize, struct_span_code_err};
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Res};
-use rustc_hir::intravisit::Visitor;
 use rustc_hir::{HirId, HirIdMap, Node};
 use rustc_hir_analysis::check::check_abi;
 use rustc_hir_analysis::hir_ty_lowering::HirTyLowerer;
@@ -117,13 +117,13 @@ fn typeck_with_inspect<'tcx>(
 
     let id = tcx.local_def_id_to_hir_id(def_id);
     let node = tcx.hir_node(id);
-    let span = tcx.hir().span(id);
+    let span = tcx.def_span(def_id);
 
     // Figure out what primary body this item has.
     let body_id = node.body_id().unwrap_or_else(|| {
         span_bug!(span, "can't type-check body of {:?}", def_id);
     });
-    let body = tcx.hir().body(body_id);
+    let body = tcx.hir_body(body_id);
 
     let param_env = tcx.param_env(def_id);
 
@@ -133,7 +133,12 @@ fn typeck_with_inspect<'tcx>(
     }
     let mut fcx = FnCtxt::new(&root_ctxt, param_env, def_id);
 
-    if let Some(hir::FnSig { header, decl, .. }) = node.fn_sig() {
+    if let hir::Node::Item(hir::Item { kind: hir::ItemKind::GlobalAsm { .. }, .. }) = node {
+        // Check the fake body of a global ASM. There's not much to do here except
+        // for visit the asm expr of the body.
+        let ty = fcx.check_expr(body.value);
+        fcx.write_ty(id, ty);
+    } else if let Some(hir::FnSig { header, decl, .. }) = node.fn_sig() {
         let fn_sig = if decl.output.is_suggestable_infer_ty().is_some() {
             // In the case that we're recovering `fn() -> W<_>` or some other return
             // type that has an infer in it, lower the type directly so that it'll
@@ -186,15 +191,19 @@ fn typeck_with_inspect<'tcx>(
         let wf_code = ObligationCauseCode::WellFormed(Some(WellFormedLoc::Ty(def_id)));
         fcx.register_wf_obligation(expected_type.into(), body.value.span, wf_code);
 
-        fcx.require_type_is_sized(expected_type, body.value.span, ObligationCauseCode::ConstSized);
-
-        // Gather locals in statics (because of block expressions).
-        GatherLocalsVisitor::new(&fcx).visit_body(body);
-
         fcx.check_expr_coercible_to_type(body.value, expected_type, None);
 
         fcx.write_ty(id, expected_type);
     };
+
+    // Whether to check repeat exprs before/after inference fallback is somewhat arbitrary of a decision
+    // as neither option is strictly more permissive than the other. However, we opt to check repeat exprs
+    // first as errors from not having inferred array lengths yet seem less confusing than errors from inference
+    // fallback arbitrarily inferring something incompatible with `Copy` inference side effects.
+    //
+    // This should also be forwards compatible with moving repeat expr checks to a custom goal kind or using
+    // marker traits in the future.
+    fcx.check_repeat_exprs();
 
     fcx.type_inference_fallback();
 
@@ -237,9 +246,7 @@ fn typeck_with_inspect<'tcx>(
 
     let typeck_results = fcx.resolve_type_vars_in_body(body);
 
-    // We clone the defined opaque types during writeback in the new solver
-    // because we have to use them during normalization.
-    let _ = fcx.infcx.take_opaque_types();
+    fcx.detect_opaque_types_added_during_writeback();
 
     // Consistency check our TypeckResults instance can hold all ItemLocalIds
     // it will need to hold.
@@ -254,7 +261,7 @@ fn infer_type_if_missing<'tcx>(fcx: &FnCtxt<'_, 'tcx>, node: Node<'tcx>) -> Opti
     let expected_type = if let Some(&hir::Ty { kind: hir::TyKind::Infer(()), span, .. }) = node.ty()
     {
         if let Some(item) = tcx.opt_associated_item(def_id.into())
-            && let ty::AssocKind::Const = item.kind
+            && let ty::AssocKind::Const { .. } = item.kind
             && let ty::AssocItemContainer::Impl = item.container
             && let Some(trait_item_def_id) = item.trait_item_def_id
         {
@@ -279,12 +286,9 @@ fn infer_type_if_missing<'tcx>(fcx: &FnCtxt<'_, 'tcx>, node: Node<'tcx>) -> Opti
                 Some(fcx.next_ty_var(span))
             }
             Node::Expr(&hir::Expr { kind: hir::ExprKind::InlineAsm(asm), span, .. })
-            | Node::Item(&hir::Item { kind: hir::ItemKind::GlobalAsm(asm), span, .. }) => {
+            | Node::Item(&hir::Item { kind: hir::ItemKind::GlobalAsm { asm, .. }, span, .. }) => {
                 asm.operands.iter().find_map(|(op, _op_sp)| match op {
-                    hir::InlineAsmOperand::Const { anon_const }
-                    | hir::InlineAsmOperand::SymFn { anon_const }
-                        if anon_const.hir_id == id =>
-                    {
+                    hir::InlineAsmOperand::Const { anon_const } if anon_const.hir_id == id => {
                         Some(fcx.next_ty_var(span))
                     }
                     _ => None,

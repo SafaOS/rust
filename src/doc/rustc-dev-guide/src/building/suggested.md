@@ -1,4 +1,4 @@
-# Suggested Workflows
+# Suggested workflows
 
 The full bootstrapping process takes quite a while. Here are some suggestions to
 make your life easier.
@@ -19,6 +19,43 @@ A prebuilt git hook lives at [`src/etc/pre-push.sh`].  It can be copied into
 your `.git/hooks` folder as `pre-push` (without the `.sh` extension!).
 
 You can also install the hook as a step of running `./x setup`!
+
+## Config extensions
+
+When working on different tasks, you might need to switch between different bootstrap configurations.
+Sometimes you may want to keep an old configuration for future use. But saving raw config values in
+random files and manually copying and pasting them can quickly become messy, especially if you have a
+long history of different configurations.
+
+To simplify managing multiple configurations, you can create config extensions.
+
+For example, you can create a simple config file named `cross.toml`:
+
+```toml
+[build]
+build = "x86_64-unknown-linux-gnu"
+host = ["i686-unknown-linux-gnu"]
+target = ["i686-unknown-linux-gnu"]
+
+
+[llvm]
+download-ci-llvm = false
+
+[target.x86_64-unknown-linux-gnu]
+llvm-config = "/path/to/llvm-19/bin/llvm-config"
+```
+
+Then, include this in your `bootstrap.toml`:
+
+```toml
+include = ["cross.toml"]
+```
+
+You can also include extensions within extensions recursively.
+
+**Note:** In the `include` field, the overriding logic follows a right-to-left order. For example,
+in `include = ["a.toml", "b.toml"]`, extension `b.toml` overrides `a.toml`. Also, parent extensions
+always overrides the inner ones.
 
 ## Configuring `rust-analyzer` for `rustc`
 
@@ -120,10 +157,59 @@ create a `.vim/coc-settings.json`. The settings can be edited with
 [`src/etc/rust_analyzer_settings.json`].
 
 Another way is without a plugin, and creating your own logic in your
-configuration. To do this you must translate the JSON to Lua yourself. The
-translation is 1:1 and fairly straight-forward. It must be put in the
-`["rust-analyzer"]` key of the setup table, which is [shown
-here](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#rust_analyzer).
+configuration. The following code will work for any checkout of rust-lang/rust (newer than Febuary 2025):
+
+```lua
+local function expand_config_variables(option)
+    local var_placeholders = {
+        ['${workspaceFolder}'] = function(_)
+            return vim.lsp.buf.list_workspace_folders()[1]
+        end,
+    }
+
+    if type(option) == "table" then
+        local mt = getmetatable(option)
+        local result = {}
+        for k, v in pairs(option) do
+            result[expand_config_variables(k)] = expand_config_variables(v)
+        end
+        return setmetatable(result, mt)
+    end
+    if type(option) ~= "string" then
+        return option
+    end
+    local ret = option
+    for key, fn in pairs(var_placeholders) do
+        ret = ret:gsub(key, fn)
+    end
+    return ret
+end
+lspconfig.rust_analyzer.setup {
+    root_dir = function()
+        local default = lspconfig.rust_analyzer.config_def.default_config.root_dir()
+        -- the default root detection uses the cargo workspace root.
+        -- but for rust-lang/rust, the standard library is in its own workspace.
+        -- use the git root instead.
+        local compiler_config = vim.fs.joinpath(default, "../src/bootstrap/defaults/config.compiler.toml")
+        if vim.fs.basename(default) == "library" and vim.uv.fs_stat(compiler_config) then
+            return vim.fs.dirname(default)
+        end
+        return default
+    end,
+    on_init = function(client)
+        local path = client.workspace_folders[1].name
+        local config = vim.fs.joinpath(path, "src/etc/rust_analyzer_zed.json")
+        if vim.uv.fs_stat(config) then
+            -- load rust-lang/rust settings
+            local file = io.open(config)
+            local json = vim.json.decode(file:read("*a"))
+            client.config.settings["rust-analyzer"] = expand_config_variables(json.lsp["rust-analyzer"].initialization_options)
+            client.notify("workspace/didChangeConfiguration", { settings = client.config.settings })
+        end
+        return true
+    end
+}
+```
 
 If you would like to use the build task that is described above, you may either
 make your own command in your config, or you can install a plugin such as
@@ -153,6 +239,16 @@ It can be configured through `languages.toml`, as described
 You can run `./x setup editor` and select `helix`, which will prompt you to
 create `languages.toml` with the recommended configuration for Helix. The
 recommended settings live at [`src/etc/rust_analyzer_helix.toml`].
+
+### Zed
+
+Zed comes with built-in LSP and rust-analyzer support.
+It can be configured through `.zed/settings.json`, as described
+[here](https://zed.dev/docs/configuring-languages). Selecting `zed`
+in `./x setup editor` will prompt you to create a `.zed/settings.json`
+file which will configure Zed with the recommended configuration. The
+recommended `rust-analyzer` settings live
+at [`src/etc/rust_analyzer_zed.json`].
 
 ## Check, check, and check again
 
@@ -270,7 +366,7 @@ subsequent rebuilds:
 ```
 
 If you don't want to include the flag with every command, you can enable it in
-the `config.toml`:
+the `bootstrap.toml`:
 
 ```toml
 [rust]
@@ -349,20 +445,20 @@ ln -s ./src/tools/nix-dev-shell/envrc-shell ./.envrc # Use nix-shell
 ### Note
 
 Note that when using nix on a not-NixOS distribution, it may be necessary to set
-**`patch-binaries-for-nix = true` in `config.toml`**. Bootstrap tries to detect
+**`patch-binaries-for-nix = true` in `bootstrap.toml`**. Bootstrap tries to detect
 whether it's running in nix and enable patching automatically, but this
 detection can have false negatives.
 
-You can also use your nix shell to manage `config.toml`:
+You can also use your nix shell to manage `bootstrap.toml`:
 
 ```nix
 let
   config = pkgs.writeText "rustc-config" ''
-    # Your config.toml content goes here
+    # Your bootstrap.toml content goes here
   ''
 pkgs.mkShell {
   /* ... */
-  # This environment variable tells bootstrap where our config.toml is.
+  # This environment variable tells bootstrap where our bootstrap.toml is.
   RUST_BOOTSTRAP_CONFIG = config;
 }
 ```
@@ -381,4 +477,5 @@ load this completion.
 [`src/etc/rust_analyzer_settings.json`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_settings.json
 [`src/etc/rust_analyzer_eglot.el`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_eglot.el
 [`src/etc/rust_analyzer_helix.toml`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_helix.toml
+[`src/etc/rust_analyzer_zed.json`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_zed.json
 [`src/etc/pre-push.sh`]: https://github.com/rust-lang/rust/blob/master/src/etc/pre-push.sh

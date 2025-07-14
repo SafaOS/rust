@@ -14,7 +14,8 @@ pub use crate::marker::{Copy, Send, Sized, Sync, Unpin};
 #[stable(feature = "core_prelude", since = "1.4.0")]
 #[doc(no_inline)]
 pub use crate::ops::{Drop, Fn, FnMut, FnOnce};
-#[stable(feature = "async_closure", since = "1.85.0")]
+#[cfg_attr(bootstrap, unstable(feature = "async_closure", issue = "62290"))]
+#[cfg_attr(not(bootstrap), stable(feature = "async_closure", since = "1.85.0"))]
 #[doc(no_inline)]
 pub use crate::ops::{AsyncFn, AsyncFnMut, AsyncFnOnce};
 
@@ -59,6 +60,7 @@ pub use crate::hash::macros::Hash;
 
 #[stable(feature = "builtin_macro_prelude", since = "1.38.0")]
 #[allow(deprecated)]
+#[cfg_attr(bootstrap, allow(deprecated_in_future))]
 #[doc(no_inline)]
 pub use crate::{
     assert, cfg, column, compile_error, concat, concat_idents, env, file, format_args,
@@ -111,3 +113,10 @@ pub use crate::macros::builtin::type_ascribe;
     reason = "placeholder syntax for deref patterns"
 )]
 pub use crate::macros::builtin::deref;
+
+#[unstable(
+    feature = "type_alias_impl_trait",
+    issue = "63063",
+    reason = "`type_alias_impl_trait` has open design concerns"
+)]
+pub use crate::macros::builtin::define_opaque;

@@ -1,17 +1,17 @@
 use hir::{HasSource, InFile, InRealFile, Semantics};
 use ide_db::{
-    defs::Definition, helpers::visit_file_defs, FileId, FilePosition, FileRange, FxHashSet,
-    RootDatabase,
+    FileId, FilePosition, FileRange, FxIndexSet, RootDatabase, defs::Definition,
+    helpers::visit_file_defs,
 };
 use itertools::Itertools;
-use syntax::{ast::HasName, AstNode, TextRange};
+use syntax::{AstNode, TextRange, ast::HasName};
 
 use crate::{
+    NavigationTarget, RunnableKind,
     annotations::fn_references::find_all_methods,
     goto_implementation::goto_implementation,
     references::find_all_refs,
-    runnables::{runnables, Runnable},
-    NavigationTarget, RunnableKind,
+    runnables::{Runnable, runnables},
 };
 
 mod fn_references;
@@ -55,7 +55,7 @@ pub(crate) fn annotations(
     config: &AnnotationConfig,
     file_id: FileId,
 ) -> Vec<Annotation> {
-    let mut annotations = FxHashSet::default();
+    let mut annotations = FxIndexSet::default();
 
     if config.annotate_runnables {
         for runnable in runnables(db, file_id) {
@@ -149,7 +149,7 @@ pub(crate) fn annotations(
             source_file_id: FileId,
         ) -> Option<(TextRange, Option<TextRange>)> {
             if let Some(InRealFile { file_id, value }) = node.original_ast_node_rooted(db) {
-                if file_id == source_file_id {
+                if file_id.file_id(db) == source_file_id {
                     return Some((
                         value.syntax().text_range(),
                         value.name().map(|name| name.syntax().text_range()),
@@ -170,7 +170,12 @@ pub(crate) fn annotations(
         }));
     }
 
-    annotations.into_iter().sorted_by_key(|a| (a.range.start(), a.range.end())).collect()
+    annotations
+        .into_iter()
+        .sorted_by_key(|a| {
+            (a.range.start(), a.range.end(), matches!(a.kind, AnnotationKind::Runnable(..)))
+        })
+        .collect()
 }
 
 pub(crate) fn resolve_annotation(db: &RootDatabase, mut annotation: Annotation) -> Annotation {
@@ -204,9 +209,9 @@ fn should_skip_runnable(kind: &RunnableKind, binary_target: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
-    use crate::{fixture, Annotation, AnnotationConfig};
+    use crate::{Annotation, AnnotationConfig, fixture};
 
     use super::AnnotationLocation;
 
@@ -537,6 +542,20 @@ fn main() {
                     },
                     Annotation {
                         range: 69..73,
+                        kind: HasReferences {
+                            pos: FilePositionWrapper {
+                                file_id: FileId(
+                                    0,
+                                ),
+                                offset: 69,
+                            },
+                            data: Some(
+                                [],
+                            ),
+                        },
+                    },
+                    Annotation {
+                        range: 69..73,
                         kind: Runnable(
                             Runnable {
                                 use_name_in_title: false,
@@ -558,20 +577,6 @@ fn main() {
                                 },
                             },
                         ),
-                    },
-                    Annotation {
-                        range: 69..73,
-                        kind: HasReferences {
-                            pos: FilePositionWrapper {
-                                file_id: FileId(
-                                    0,
-                                ),
-                                offset: 69,
-                            },
-                            data: Some(
-                                [],
-                            ),
-                        },
                     },
                 ]
             "#]],
@@ -719,6 +724,20 @@ fn main() {
                     },
                     Annotation {
                         range: 61..65,
+                        kind: HasReferences {
+                            pos: FilePositionWrapper {
+                                file_id: FileId(
+                                    0,
+                                ),
+                                offset: 61,
+                            },
+                            data: Some(
+                                [],
+                            ),
+                        },
+                    },
+                    Annotation {
+                        range: 61..65,
                         kind: Runnable(
                             Runnable {
                                 use_name_in_title: false,
@@ -740,20 +759,6 @@ fn main() {
                                 },
                             },
                         ),
-                    },
-                    Annotation {
-                        range: 61..65,
-                        kind: HasReferences {
-                            pos: FilePositionWrapper {
-                                file_id: FileId(
-                                    0,
-                                ),
-                                offset: 61,
-                            },
-                            data: Some(
-                                [],
-                            ),
-                        },
                     },
                 ]
             "#]],

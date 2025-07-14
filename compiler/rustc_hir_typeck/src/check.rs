@@ -3,9 +3,8 @@ use std::cell::RefCell;
 use rustc_abi::ExternAbi;
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
-use rustc_hir::intravisit::Visitor;
 use rustc_hir::lang_items::LangItem;
-use rustc_hir_analysis::check::{check_function_signature, forbid_intrinsic_abi};
+use rustc_hir_analysis::check::check_function_signature;
 use rustc_infer::infer::RegionVariableOrigin;
 use rustc_infer::traits::WellFormedLoc;
 use rustc_middle::ty::{self, Binder, Ty, TyCtxt};
@@ -35,12 +34,8 @@ pub(super) fn check_fn<'a, 'tcx>(
     params_can_be_unsized: bool,
 ) -> Option<CoroutineTypes<'tcx>> {
     let fn_id = fcx.tcx.local_def_id_to_hir_id(fn_def_id);
-
     let tcx = fcx.tcx;
-    let hir = tcx.hir();
-
     let declared_ret_ty = fn_sig.output();
-
     let ret_ty =
         fcx.register_infer_ok_obligations(fcx.infcx.replace_opaque_types_with_inference_vars(
             declared_ret_ty,
@@ -54,9 +49,9 @@ pub(super) fn check_fn<'a, 'tcx>(
 
     let span = body.value.span;
 
-    forbid_intrinsic_abi(tcx, span, fn_sig.abi);
-
-    GatherLocalsVisitor::new(fcx).visit_body(body);
+    for param in body.params {
+        GatherLocalsVisitor::gather_from_param(fcx, param);
+    }
 
     // C-variadic fns also have a `VaList` input that's not listed in `fn_sig`
     // (as it's created inside the body itself, not passed in from outside).
@@ -69,7 +64,7 @@ pub(super) fn check_fn<'a, 'tcx>(
     });
 
     // Add formal parameters.
-    let inputs_hir = hir.fn_decl_by_hir_id(fn_id).map(|decl| &decl.inputs);
+    let inputs_hir = tcx.hir_fn_decl_by_hir_id(fn_id).map(|decl| &decl.inputs);
     let inputs_fn = fn_sig.inputs().iter().copied();
     for (idx, (param_ty, param)) in inputs_fn.chain(maybe_va_list).zip(body.params).enumerate() {
         // We checked the root's signature during wfcheck, but not the child.

@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gccjit::{CType, Context, FunctionType, GlobalKind};
+use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::base::maybe_create_entry_wrapper;
 use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::traits::DebugInfoCodegenMethods;
-use rustc_codegen_ssa::{ModuleCodegen, ModuleKind};
 use rustc_middle::dep_graph;
 use rustc_middle::mir::mono::Linkage;
 #[cfg(feature = "master")]
@@ -206,7 +206,7 @@ pub fn compile_codegen_unit(
             let f128_type_supported = target_info.supports_target_dependent_type(CType::Float128);
             let u128_type_supported = target_info.supports_target_dependent_type(CType::UInt128t);
             // TODO: improve this to avoid passing that many arguments.
-            let cx = CodegenCx::new(
+            let mut cx = CodegenCx::new(
                 &context,
                 cgu,
                 tcx,
@@ -223,8 +223,8 @@ pub fn compile_codegen_unit(
             }
 
             // ... and now that we have everything pre-defined, fill out those definitions.
-            for &(mono_item, _) in &mono_items {
-                mono_item.define::<Builder<'_, '_, '_>>(&cx);
+            for &(mono_item, item_data) in &mono_items {
+                mono_item.define::<Builder<'_, '_, '_>>(&mut cx, item_data);
             }
 
             // If this codegen unit contains the main function, also create the
@@ -237,16 +237,15 @@ pub fn compile_codegen_unit(
             }
         }
 
-        ModuleCodegen {
-            name: cgu_name.to_string(),
-            module_llvm: GccContext {
+        ModuleCodegen::new_regular(
+            cgu_name.to_string(),
+            GccContext {
                 context: Arc::new(SyncContext::new(context)),
                 relocation_model: tcx.sess.relocation_model(),
                 should_combine_object_files: false,
                 temp_dir: None,
             },
-            kind: ModuleKind::Regular,
-        }
+        )
     }
 
     (module, cost)

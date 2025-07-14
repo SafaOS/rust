@@ -55,18 +55,15 @@ use crate::{fmt, ops, slice, str};
 /// Passing a Rust-originating C string:
 ///
 /// ```
-/// use std::ffi::{CString, CStr};
+/// use std::ffi::CStr;
 /// use std::os::raw::c_char;
 ///
 /// fn work(data: &CStr) {
-/// #   /* Extern functions are awkward in doc comments - fake it instead
-///     extern "C" { fn work_with(data: *const c_char); }
-/// #   */ unsafe extern "C" fn work_with(s: *const c_char) {}
-///
+///     unsafe extern "C" fn work_with(s: *const c_char) {}
 ///     unsafe { work_with(data.as_ptr()) }
 /// }
 ///
-/// let s = CString::new("data data data data").expect("CString::new failed");
+/// let s = c"Hello world!";
 /// work(&s);
 /// ```
 ///
@@ -82,8 +79,9 @@ use crate::{fmt, ops, slice, str};
 ///
 /// fn my_string_safe() -> String {
 ///     let cstr = unsafe { CStr::from_ptr(my_string()) };
-///     // Get copy-on-write Cow<'_, str>, then guarantee a freshly-owned String allocation
-///     String::from_utf8_lossy(cstr.to_bytes()).to_string()
+///     // Get a copy-on-write Cow<'_, str>, then extract the
+///     // allocated String (or allocate a fresh one if needed).
+///     cstr.to_string_lossy().into_owned()
 /// }
 ///
 /// println!("string: {}", my_string_safe());
@@ -153,7 +151,6 @@ impl Error for FromBytesWithNulError {
 /// within the slice.
 ///
 /// This error is created by the [`CStr::from_bytes_until_nul`] method.
-///
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
 pub struct FromBytesUntilNulError(());
@@ -384,13 +381,12 @@ impl CStr {
     /// # Examples
     ///
     /// ```
-    /// use std::ffi::{CStr, CString};
+    /// use std::ffi::CStr;
     ///
-    /// unsafe {
-    ///     let cstring = CString::new("hello").expect("CString::new failed");
-    ///     let cstr = CStr::from_bytes_with_nul_unchecked(cstring.to_bytes_with_nul());
-    ///     assert_eq!(cstr, &*cstring);
-    /// }
+    /// let bytes = b"Hello world!\0";
+    ///
+    /// let cstr = unsafe { CStr::from_bytes_with_nul_unchecked(bytes) };
+    /// assert_eq!(cstr.to_bytes_with_nul(), bytes);
     /// ```
     #[inline]
     #[must_use]
@@ -449,38 +445,43 @@ impl CStr {
     /// behavior when `ptr` is used inside the `unsafe` block:
     ///
     /// ```no_run
-    /// # #![allow(unused_must_use)]
     /// # #![expect(dangling_pointers_from_temporaries)]
-    /// use std::ffi::CString;
+    /// use std::ffi::{CStr, CString};
     ///
-    /// // Do not do this:
-    /// let ptr = CString::new("Hello").expect("CString::new failed").as_ptr();
-    /// unsafe {
-    ///     // `ptr` is dangling
-    ///     *ptr;
-    /// }
+    /// // 💀 The meaning of this entire program is undefined,
+    /// // 💀 and nothing about its behavior is guaranteed,
+    /// // 💀 not even that its behavior resembles the code as written,
+    /// // 💀 just because it contains a single instance of undefined behavior!
+    ///
+    /// // 🚨 creates a dangling pointer to a temporary `CString`
+    /// // 🚨 that is deallocated at the end of the statement
+    /// let ptr = CString::new("Hi!".to_uppercase()).unwrap().as_ptr();
+    ///
+    /// // without undefined behavior, you would expect that `ptr` equals:
+    /// dbg!(CStr::from_bytes_with_nul(b"HI!\0").unwrap());
+    ///
+    /// // 🙏 Possibly the program behaved as expected so far,
+    /// // 🙏 and this just shows `ptr` is now garbage..., but
+    /// // 💀 this violates `CStr::from_ptr`'s safety contract
+    /// // 💀 leading to a dereference of a dangling pointer,
+    /// // 💀 which is immediate undefined behavior.
+    /// // 💀 *BOOM*, you're dead, you're entire program has no meaning.
+    /// dbg!(unsafe { CStr::from_ptr(ptr) });
     /// ```
     ///
-    /// This happens because the pointer returned by `as_ptr` does not carry any
-    /// lifetime information and the `CString` is deallocated immediately after
-    /// the `CString::new("Hello").expect("CString::new failed").as_ptr()`
-    /// expression is evaluated.
+    /// This happens because, the pointer returned by `as_ptr` does not carry any
+    /// lifetime information, and the `CString` is deallocated immediately after
+    /// the expression that it is part of has been evaluated.
     /// To fix the problem, bind the `CString` to a local variable:
     ///
-    /// ```no_run
-    /// # #![allow(unused_must_use)]
-    /// use std::ffi::CString;
-    ///
-    /// let hello = CString::new("Hello").expect("CString::new failed");
-    /// let ptr = hello.as_ptr();
-    /// unsafe {
-    ///     // `ptr` is valid because `hello` is in scope
-    ///     *ptr;
-    /// }
     /// ```
+    /// use std::ffi::{CStr, CString};
     ///
-    /// This way, the lifetime of the `CString` in `hello` encompasses
-    /// the lifetime of `ptr` and the `unsafe` block.
+    /// let c_str = CString::new("Hi!".to_uppercase()).unwrap();
+    /// let ptr = c_str.as_ptr();
+    ///
+    /// assert_eq!(unsafe { CStr::from_ptr(ptr) }, c"HI!");
+    /// ```
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]

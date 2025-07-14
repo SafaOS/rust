@@ -3,7 +3,7 @@ use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::msrvs::Msrv;
 use clippy_utils::source::snippet_with_context;
 use clippy_utils::ty::{implements_trait, is_type_diagnostic_item};
-use clippy_utils::{msrvs, path_to_local, std_or_core};
+use clippy_utils::{msrvs, path_to_local, std_or_core, sym};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir::def::{DefKind, Res};
@@ -11,7 +11,6 @@ use rustc_hir::intravisit::{Visitor, walk_expr};
 use rustc_hir::{BindingMode, Block, Expr, ExprKind, HirId, Mutability, Node, Pat, PatKind, Stmt, StmtKind};
 use rustc_lint::LateContext;
 use rustc_span::SyntaxContext;
-use rustc_span::symbol::sym;
 
 /// Detects for loop pushing the same item into a Vec
 pub(super) fn check<'tcx>(
@@ -20,14 +19,14 @@ pub(super) fn check<'tcx>(
     _: &'tcx Expr<'_>,
     body: &'tcx Expr<'_>,
     _: &'tcx Expr<'_>,
-    msrv: &Msrv,
+    msrv: Msrv,
 ) {
-    fn emit_lint(cx: &LateContext<'_>, vec: &Expr<'_>, pushed_item: &Expr<'_>, ctxt: SyntaxContext, msrv: &Msrv) {
+    fn emit_lint(cx: &LateContext<'_>, vec: &Expr<'_>, pushed_item: &Expr<'_>, ctxt: SyntaxContext, msrv: Msrv) {
         let mut app = Applicability::Unspecified;
         let vec_str = snippet_with_context(cx, vec.span, ctxt, "", &mut app).0;
         let item_str = snippet_with_context(cx, pushed_item.span, ctxt, "", &mut app).0;
 
-        let secondary_help = if msrv.meets(msrvs::REPEAT_N)
+        let secondary_help = if msrv.meets(cx, msrvs::REPEAT_N)
             && let Some(std_or_core) = std_or_core(cx)
         {
             format!("or `{vec_str}.extend({std_or_core}::iter::repeat_n({item_str}, SIZE))`")
@@ -187,8 +186,8 @@ fn get_vec_push<'tcx>(
             // Extract method being called and figure out the parameters for the method call
             && let ExprKind::MethodCall(path, self_expr, [pushed_item], _) = &semi_stmt.kind
             // Check that the method being called is push() on a Vec
+            && path.ident.name == sym::push
             && is_type_diagnostic_item(cx, cx.typeck_results().expr_ty(self_expr), sym::Vec)
-            && path.ident.name.as_str() == "push"
     {
         return Some((self_expr, pushed_item, semi_stmt.span.ctxt()));
     }

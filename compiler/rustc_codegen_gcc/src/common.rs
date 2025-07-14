@@ -33,12 +33,11 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
     }
 
     pub fn const_bitcast(&self, value: RValue<'gcc>, typ: Type<'gcc>) -> RValue<'gcc> {
-        if value.get_type() == self.bool_type.make_pointer() {
-            if let Some(pointee) = typ.get_pointee() {
-                if pointee.dyncast_vector().is_some() {
-                    panic!()
-                }
-            }
+        if value.get_type() == self.bool_type.make_pointer()
+            && let Some(pointee) = typ.get_pointee()
+            && pointee.dyncast_vector().is_some()
+        {
+            panic!()
         }
         // NOTE: since bitcast makes a value non-constant, don't bitcast if not necessary as some
         // SIMD builtins require a constant value.
@@ -59,7 +58,7 @@ pub fn type_is_pointer(typ: Type<'_>) -> bool {
     typ.get_pointee().is_some()
 }
 
-impl<'gcc, 'tcx> ConstCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
+impl<'gcc, 'tcx> ConstCodegenMethods for CodegenCx<'gcc, 'tcx> {
     fn const_null(&self, typ: Type<'gcc>) -> RValue<'gcc> {
         if type_is_pointer(typ) { self.context.new_null(typ) } else { self.const_int(typ, 0) }
     }
@@ -141,13 +140,12 @@ impl<'gcc, 'tcx> ConstCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
     }
 
     fn const_str(&self, s: &str) -> (RValue<'gcc>, RValue<'gcc>) {
-        let str_global = *self
-            .const_str_cache
-            .borrow_mut()
-            .raw_entry_mut()
-            .from_key(s)
-            .or_insert_with(|| (s.to_owned(), self.global_string(s)))
-            .1;
+        let mut const_str_cache = self.const_str_cache.borrow_mut();
+        let str_global = const_str_cache.get(s).copied().unwrap_or_else(|| {
+            let g = self.global_string(s);
+            const_str_cache.insert(s.to_owned(), g);
+            g
+        });
         let len = s.len();
         let cs = self.const_ptrcast(
             str_global.get_address(None),
@@ -258,7 +256,7 @@ impl<'gcc, 'tcx> ConstCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
         }
     }
 
-    fn const_data_from_alloc(&self, alloc: ConstAllocation<'tcx>) -> Self::Value {
+    fn const_data_from_alloc(&self, alloc: ConstAllocation<'_>) -> Self::Value {
         const_alloc_to_gcc(self, alloc)
     }
 

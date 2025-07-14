@@ -8,15 +8,12 @@ use rustc_errors::{Applicability, Diag, EmissionGuarantee, MultiSpan, listify};
 use rustc_hir::def::{CtorKind, Namespace};
 use rustc_hir::{self as hir, CoroutineKind, LangItem};
 use rustc_index::IndexSlice;
-use rustc_infer::infer::{
-    BoundRegionConversionTime, NllRegionVariableOrigin, RegionVariableOrigin,
-};
+use rustc_infer::infer::{BoundRegionConversionTime, NllRegionVariableOrigin};
 use rustc_infer::traits::SelectionError;
 use rustc_middle::bug;
-use rustc_middle::mir::tcx::PlaceTy;
 use rustc_middle::mir::{
     AggregateKind, CallSource, ConstOperand, ConstraintCategory, FakeReadCause, Local, LocalInfo,
-    LocalKind, Location, Operand, Place, PlaceRef, ProjectionElem, Rvalue, Statement,
+    LocalKind, Location, Operand, Place, PlaceRef, PlaceTy, ProjectionElem, Rvalue, Statement,
     StatementKind, Terminator, TerminatorKind, find_self_call,
 };
 use rustc_middle::ty::print::Print;
@@ -320,6 +317,14 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
         opt: DescribePlaceOpt,
     ) -> Option<String> {
         let local = place.local;
+        if self.body.local_decls[local]
+            .source_info
+            .span
+            .in_external_macro(self.infcx.tcx.sess.source_map())
+        {
+            return None;
+        }
+
         let mut autoderef_index = None;
         let mut buf = String::new();
         let mut ok = self.append_local_to_string(local, &mut buf);
@@ -506,7 +511,7 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
                     let var_id =
                         self.infcx.tcx.closure_captures(def_id)[field.index()].get_root_variable();
 
-                    Some(self.infcx.tcx.hir().name(var_id).to_string())
+                    Some(self.infcx.tcx.hir_name(var_id).to_string())
                 }
                 _ => {
                     // Might need a revision when the fields in trait RFC is implemented
@@ -588,7 +593,7 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
         // this by hooking into the pretty printer and telling it to label the
         // lifetimes without names with the value `'0`.
         if let ty::Ref(region, ..) = ty.kind() {
-            match **region {
+            match region.kind() {
                 ty::ReBound(_, ty::BoundRegion { kind: br, .. })
                 | ty::RePlaceholder(ty::PlaceholderRegion {
                     bound: ty::BoundRegion { kind: br, .. },
@@ -608,7 +613,7 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
         let mut printer = ty::print::FmtPrinter::new(self.infcx.tcx, Namespace::TypeNS);
 
         let region = if let ty::Ref(region, ..) = ty.kind() {
-            match **region {
+            match region.kind() {
                 ty::ReBound(_, ty::BoundRegion { kind: br, .. })
                 | ty::RePlaceholder(ty::PlaceholderRegion {
                     bound: ty::BoundRegion { kind: br, .. },
@@ -634,9 +639,8 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
     ) {
         let predicate_span = path.iter().find_map(|constraint| {
             let outlived = constraint.sub;
-            if let Some(origin) = self.regioncx.var_infos.get(outlived)
-                && let RegionVariableOrigin::Nll(NllRegionVariableOrigin::Placeholder(_)) =
-                    origin.origin
+            if let Some(origin) = self.regioncx.definitions.get(outlived)
+                && let NllRegionVariableOrigin::Placeholder(_) = origin.origin
                 && let ConstraintCategory::Predicate(span) = constraint.category
             {
                 Some(span)
@@ -1030,7 +1034,7 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
                 method_args,
                 *fn_span,
                 call_source.from_hir_call(),
-                Some(self.infcx.tcx.fn_arg_names(method_did)[0]),
+                self.infcx.tcx.fn_arg_idents(method_did)[0],
             );
 
             return FnSelfUse {
@@ -1125,9 +1129,9 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
             def_id, target_place, places
         );
         let hir_id = self.infcx.tcx.local_def_id_to_hir_id(def_id);
-        let expr = &self.infcx.tcx.hir().expect_expr(hir_id).kind;
+        let expr = &self.infcx.tcx.hir_expect_expr(hir_id).kind;
         debug!("closure_span: hir_id={:?} expr={:?}", hir_id, expr);
-        if let hir::ExprKind::Closure(&hir::Closure { kind, fn_decl_span, .. }) = expr {
+        if let &hir::ExprKind::Closure(&hir::Closure { kind, fn_decl_span, .. }) = expr {
             for (captured_place, place) in
                 self.infcx.tcx.closure_captures(def_id).iter().zip(places)
             {
@@ -1220,7 +1224,7 @@ impl<'infcx, 'tcx> MirBorrowckCtxt<'_, 'infcx, 'tcx> {
                             .tcx
                             .typeck_root_def_id(self.mir_def_id().to_def_id())
                             .as_local()
-                            .and_then(|def_id| self.infcx.tcx.hir().get_generics(def_id))
+                            .and_then(|def_id| self.infcx.tcx.hir_get_generics(def_id))
                         && let spans = hir_generics
                             .predicates
                             .iter()

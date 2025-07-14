@@ -1,9 +1,12 @@
 //
 //@ compile-flags: -C no-prepopulate-passes
+// 32bit MSVC does not align things properly so we suppress high alignment annotations (#112480)
+//@ ignore-i686-pc-windows-msvc
+//@ ignore-i686-pc-windows-gnu
 
 #![crate_type = "lib"]
 #![allow(non_camel_case_types)]
-#![feature(repr_simd, intrinsics)]
+#![feature(repr_simd, core_intrinsics)]
 
 #[repr(simd)]
 #[derive(Copy, Clone)]

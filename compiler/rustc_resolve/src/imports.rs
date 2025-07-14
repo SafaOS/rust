@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::mem;
 
 use rustc_ast::NodeId;
-use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::fx::{FxHashSet, FxIndexSet};
 use rustc_data_structures::intern::Interned;
 use rustc_errors::codes::*;
 use rustc_errors::{Applicability, MultiSpan, pluralize, struct_span_code_err};
@@ -30,8 +30,7 @@ use crate::diagnostics::{DiagMode, Suggestion, import_candidates};
 use crate::errors::{
     CannotBeReexportedCratePublic, CannotBeReexportedCratePublicNS, CannotBeReexportedPrivate,
     CannotBeReexportedPrivateNS, CannotDetermineImportResolution, CannotGlobImportAllCrates,
-    ConsiderAddingMacroExport, ConsiderMarkingAsPub, IsNotDirectlyImportable,
-    ItemsInTraitsAreNotImportable,
+    ConsiderAddingMacroExport, ConsiderMarkingAsPub,
 };
 use crate::{
     AmbiguityError, AmbiguityKind, BindingKey, Finalize, ImportSuggestion, Module,
@@ -98,13 +97,13 @@ impl<'ra> std::fmt::Debug for ImportKind<'ra> {
         use ImportKind::*;
         match self {
             Single {
-                ref source,
-                ref target,
-                ref source_bindings,
-                ref target_bindings,
-                ref type_ns_only,
-                ref nested,
-                ref id,
+                source,
+                target,
+                source_bindings,
+                target_bindings,
+                type_ns_only,
+                nested,
+                id,
             } => f
                 .debug_struct("Single")
                 .field("source", source)
@@ -122,13 +121,13 @@ impl<'ra> std::fmt::Debug for ImportKind<'ra> {
                 .field("nested", nested)
                 .field("id", id)
                 .finish(),
-            Glob { ref is_prelude, ref max_vis, ref id } => f
+            Glob { is_prelude, max_vis, id } => f
                 .debug_struct("Glob")
                 .field("is_prelude", is_prelude)
                 .field("max_vis", max_vis)
                 .field("id", id)
                 .finish(),
-            ExternCrate { ref source, ref target, ref id } => f
+            ExternCrate { source, target, id } => f
                 .debug_struct("ExternCrate")
                 .field("source", source)
                 .field("target", target)
@@ -182,6 +181,19 @@ pub(crate) struct ImportData<'ra> {
 /// so we can use referential equality to compare them.
 pub(crate) type Import<'ra> = Interned<'ra, ImportData<'ra>>;
 
+// Allows us to use Interned without actually enforcing (via Hash/PartialEq/...) uniqueness of the
+// contained data.
+// FIXME: We may wish to actually have at least debug-level assertions that Interned's guarantees
+// are upheld.
+impl std::hash::Hash for ImportData<'_> {
+    fn hash<H>(&self, _: &mut H)
+    where
+        H: std::hash::Hasher,
+    {
+        unreachable!()
+    }
+}
+
 impl<'ra> ImportData<'ra> {
     pub(crate) fn is_glob(&self) -> bool {
         matches!(self.kind, ImportKind::Glob { .. })
@@ -220,7 +232,7 @@ impl<'ra> ImportData<'ra> {
 pub(crate) struct NameResolution<'ra> {
     /// Single imports that may define the name in the namespace.
     /// Imports are arena-allocated, so it's ok to use pointers as keys.
-    pub single_imports: FxHashSet<Import<'ra>>,
+    pub single_imports: FxIndexSet<Import<'ra>>,
     /// The least shadowable known binding for this name, or None if there are no known bindings.
     pub binding: Option<NameBinding<'ra>>,
     pub shadowed_glob: Option<NameBinding<'ra>>,
@@ -481,7 +493,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 let key = BindingKey::new(target, ns);
                 let _ = this.try_define(import.parent_scope.module, key, dummy_binding, false);
                 this.update_resolution(import.parent_scope.module, key, false, |_, resolution| {
-                    resolution.single_imports.remove(&import);
+                    resolution.single_imports.swap_remove(&import);
                 })
             });
             self.record_use(target, dummy_binding, Used::Other);
@@ -626,38 +638,38 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 }
 
                 if let Some(glob_binding) = resolution.shadowed_glob {
-                    let binding_id = match binding.kind {
-                        NameBindingKind::Res(res) => {
-                            Some(self.def_id_to_node_id[res.def_id().expect_local()])
-                        }
-                        NameBindingKind::Module(module) => {
-                            Some(self.def_id_to_node_id[module.def_id().expect_local()])
-                        }
-                        NameBindingKind::Import { import, .. } => import.id(),
-                    };
-
                     if binding.res() != Res::Err
                         && glob_binding.res() != Res::Err
                         && let NameBindingKind::Import { import: glob_import, .. } =
                             glob_binding.kind
-                        && let Some(binding_id) = binding_id
                         && let Some(glob_import_id) = glob_import.id()
                         && let glob_import_def_id = self.local_def_id(glob_import_id)
                         && self.effective_visibilities.is_exported(glob_import_def_id)
                         && glob_binding.vis.is_public()
                         && !binding.vis.is_public()
                     {
-                        self.lint_buffer.buffer_lint(
-                            HIDDEN_GLOB_REEXPORTS,
-                            binding_id,
-                            binding.span,
-                            BuiltinLintDiag::HiddenGlobReexports {
-                                name: key.ident.name.to_string(),
-                                namespace: key.ns.descr().to_owned(),
-                                glob_reexport_span: glob_binding.span,
-                                private_item_span: binding.span,
-                            },
-                        );
+                        let binding_id = match binding.kind {
+                            NameBindingKind::Res(res) => {
+                                Some(self.def_id_to_node_id(res.def_id().expect_local()))
+                            }
+                            NameBindingKind::Module(module) => {
+                                Some(self.def_id_to_node_id(module.def_id().expect_local()))
+                            }
+                            NameBindingKind::Import { import, .. } => import.id(),
+                        };
+                        if let Some(binding_id) = binding_id {
+                            self.lint_buffer.buffer_lint(
+                                HIDDEN_GLOB_REEXPORTS,
+                                binding_id,
+                                binding.span,
+                                BuiltinLintDiag::HiddenGlobReexports {
+                                    name: key.ident.name.to_string(),
+                                    namespace: key.ns.descr().to_owned(),
+                                    glob_reexport_span: glob_binding.span,
+                                    private_item_span: binding.span,
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -721,7 +733,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         &mut diag,
                         Some(err.span),
                         candidates,
-                        DiagMode::Import { append: false },
+                        DiagMode::Import { append: false, unresolved_import: true },
                         (source != target)
                             .then(|| format!(" as {target}"))
                             .as_deref()
@@ -822,11 +834,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
                 let parent = import.parent_scope.module;
                 match source_bindings[ns].get() {
-                    Err(Undetermined) => indeterminate_count += 1,
-                    // Don't update the resolution, because it was never added.
-                    Err(Determined) if target.name == kw::Underscore => {}
-                    Ok(binding) if binding.is_importable() => {
-                        if binding.is_assoc_const_or_fn()
+                    Ok(binding) => {
+                        if binding.is_assoc_item()
                             && !this.tcx.features().import_trait_associated_functions()
                         {
                             feature_err(
@@ -837,21 +846,21 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             )
                             .emit();
                         }
+
                         let imported_binding = this.import(binding, import);
                         target_bindings[ns].set(Some(imported_binding));
                         this.define(parent, target, ns, imported_binding);
                     }
-                    source_binding @ (Ok(..) | Err(Determined)) => {
-                        if source_binding.is_ok() {
-                            this.dcx()
-                                .create_err(IsNotDirectlyImportable { span: import.span, target })
-                                .emit();
+                    Err(Determined) => {
+                        // Don't update the resolution for underscores, because it was never added.
+                        if target.name != kw::Underscore {
+                            let key = BindingKey::new(target, ns);
+                            this.update_resolution(parent, key, false, |_, resolution| {
+                                resolution.single_imports.swap_remove(&import);
+                            });
                         }
-                        let key = BindingKey::new(target, ns);
-                        this.update_resolution(parent, key, false, |_, resolution| {
-                            resolution.single_imports.remove(&import);
-                        });
                     }
+                    Err(Undetermined) => indeterminate_count += 1,
                 }
             }
         });
@@ -942,11 +951,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     } else {
                         None
                     };
-                    let err = match self.make_path_suggestion(
-                        span,
-                        import.module_path.clone(),
-                        &import.parent_scope,
-                    ) {
+                    let err = match self
+                        .make_path_suggestion(import.module_path.clone(), &import.parent_scope)
+                    {
                         Some((suggestion, note)) => UnresolvedImportError {
                             span,
                             label: None,
@@ -1001,7 +1008,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         // HACK(eddyb) `lint_if_path_starts_with_module` needs at least
                         // 2 segments, so the `resolve_path` above won't trigger it.
                         let mut full_path = import.module_path.clone();
-                        full_path.push(Segment::from_ident(Ident::empty()));
+                        full_path.push(Segment::from_ident(Ident::dummy()));
                         self.lint_if_path_starts_with_module(Some(finalize), &full_path, None);
                     }
 
@@ -1417,10 +1424,17 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             return;
         };
 
-        if module.is_trait() {
-            self.dcx().emit_err(ItemsInTraitsAreNotImportable { span: import.span });
-            return;
-        } else if module == import.parent_scope.module {
+        if module.is_trait() && !self.tcx.features().import_trait_associated_functions() {
+            feature_err(
+                self.tcx.sess,
+                sym::import_trait_associated_functions,
+                import.span,
+                "`use` associated items of traits is unstable",
+            )
+            .emit();
+        }
+
+        if module == import.parent_scope.module {
             return;
         } else if is_prelude {
             self.prelude = Some(module);

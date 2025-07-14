@@ -399,7 +399,7 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
     }
 
     #[cfg(feature = "master")]
-    if name == sym::simd_insert {
+    if name == sym::simd_insert || name == sym::simd_insert_dyn {
         require!(
             in_elem == arg_tys[2],
             InvalidMonomorphization::InsertedType {
@@ -410,6 +410,8 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
                 out_ty: arg_tys[2]
             }
         );
+
+        // TODO(antoyo): For simd_insert, check if the index is a constant of the correct size.
         let vector = args[0].immediate();
         let index = args[1].immediate();
         let value = args[2].immediate();
@@ -422,13 +424,15 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
     }
 
     #[cfg(feature = "master")]
-    if name == sym::simd_extract {
+    if name == sym::simd_extract || name == sym::simd_extract_dyn {
         require!(
             ret_ty == in_elem,
             InvalidMonomorphization::ReturnType { span, name, in_elem, in_ty, ret_ty }
         );
+        // TODO(antoyo): For simd_extract, check if the index is a constant of the correct size.
         let vector = args[0].immediate();
-        return Ok(bx.context.new_vector_access(None, vector, args[1].immediate()).to_rvalue());
+        let index = args[1].immediate();
+        return Ok(bx.context.new_vector_access(None, vector, index).to_rvalue());
     }
 
     if name == sym::simd_select {
@@ -443,9 +447,14 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
             m_len == v_len,
             InvalidMonomorphization::MismatchedLengths { span, name, m_len, v_len }
         );
+        // TODO: also support unsigned integers.
         match *m_elem_ty.kind() {
             ty::Int(_) => {}
-            _ => return_error!(InvalidMonomorphization::MaskType { span, name, ty: m_elem_ty }),
+            _ => return_error!(InvalidMonomorphization::MaskWrongElementType {
+                span,
+                name,
+                ty: m_elem_ty
+            }),
         }
         return Ok(bx.vector_select(args[0].immediate(), args[1].immediate(), args[2].immediate()));
     }
@@ -772,8 +781,6 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
             sym::simd_floor => "floor",
             sym::simd_fma => "fma",
             sym::simd_relaxed_fma => "fma", // FIXME: this should relax to non-fused multiply-add when necessary
-            sym::simd_fpowi => "__builtin_powi",
-            sym::simd_fpow => "pow",
             sym::simd_fsin => "sin",
             sym::simd_fsqrt => "sqrt",
             sym::simd_round => "round",
@@ -788,24 +795,16 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
         let mut vector_elements = vec![];
         for i in 0..in_len {
             let index = bx.context.new_rvalue_from_long(bx.ulong_type, i as i64);
-            // we have to treat fpowi specially, since fpowi's second argument is always an i32
             let mut arguments = vec![];
-            if name == sym::simd_fpowi {
-                arguments = vec![
-                    bx.extract_element(args[0].immediate(), index).to_rvalue(),
-                    args[1].immediate(),
-                ];
-            } else {
-                for arg in args {
-                    let mut element = bx.extract_element(arg.immediate(), index).to_rvalue();
-                    // FIXME: it would probably be better to not have casts here and use the proper
-                    // instructions.
-                    if let Some(typ) = cast_type {
-                        element = bx.context.new_cast(None, element, typ);
-                    }
-                    arguments.push(element);
+            for arg in args {
+                let mut element = bx.extract_element(arg.immediate(), index).to_rvalue();
+                // FIXME: it would probably be better to not have casts here and use the proper
+                // instructions.
+                if let Some(typ) = cast_type {
+                    element = bx.context.new_cast(None, element, typ);
                 }
-            };
+                arguments.push(element);
+            }
             let mut result = bx.context.new_call(None, function, &arguments);
             if cast_type.is_some() {
                 result = bx.context.new_cast(None, result, elem_ty);
@@ -829,8 +828,6 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
             | sym::simd_floor
             | sym::simd_fma
             | sym::simd_relaxed_fma
-            | sym::simd_fpow
-            | sym::simd_fpowi
             | sym::simd_fsin
             | sym::simd_fsqrt
             | sym::simd_round
@@ -999,19 +996,15 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
         assert_eq!(pointer_count - 1, ptr_count(element_ty0));
         assert_eq!(underlying_ty, non_ptr(element_ty0));
 
-        // The element type of the third argument must be a signed integer type of any width:
+        // The element type of the third argument must be an integer type of any width:
+        // TODO: also support unsigned integers.
         let (_, element_ty2) = arg_tys[2].simd_size_and_type(bx.tcx());
         match *element_ty2.kind() {
             ty::Int(_) => (),
             _ => {
                 require!(
                     false,
-                    InvalidMonomorphization::ThirdArgElementType {
-                        span,
-                        name,
-                        expected_element: element_ty2,
-                        third_arg: arg_tys[2]
-                    }
+                    InvalidMonomorphization::MaskWrongElementType { span, name, ty: element_ty2 }
                 );
             }
         }
@@ -1117,17 +1110,13 @@ pub fn generic_simd_intrinsic<'a, 'gcc, 'tcx>(
         assert_eq!(underlying_ty, non_ptr(element_ty0));
 
         // The element type of the third argument must be a signed integer type of any width:
+        // TODO: also support unsigned integers.
         match *element_ty2.kind() {
             ty::Int(_) => (),
             _ => {
                 require!(
                     false,
-                    InvalidMonomorphization::ThirdArgElementType {
-                        span,
-                        name,
-                        expected_element: element_ty2,
-                        third_arg: arg_tys[2]
-                    }
+                    InvalidMonomorphization::MaskWrongElementType { span, name, ty: element_ty2 }
                 );
             }
         }

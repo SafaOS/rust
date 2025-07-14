@@ -13,11 +13,12 @@
 //! See also a neighboring `body` module.
 
 pub mod format_args;
+pub mod generics;
 pub mod type_ref;
 
 use std::fmt;
 
-use hir_expand::{name::Name, MacroDefId};
+use hir_expand::{MacroDefId, name::Name};
 use intern::Symbol;
 use la_arena::Idx;
 use rustc_apfloat::ieee::{Half as f16, Quad as f128};
@@ -25,10 +26,13 @@ use syntax::ast;
 use type_ref::TypeRefId;
 
 use crate::{
+    BlockId,
     builtin_type::{BuiltinFloat, BuiltinInt, BuiltinUint},
-    path::{GenericArgs, Path},
+    expr_store::{
+        HygieneId,
+        path::{GenericArgs, Path},
+    },
     type_ref::{Mutability, Rawness},
-    BlockId, ConstBlockId,
 };
 
 pub use syntax::ast::{ArithOp, BinaryOp, CmpOp, LogicOp, Ordering, RangeOp, UnaryOp};
@@ -55,11 +59,19 @@ impl ExprOrPatId {
         }
     }
 
+    pub fn is_expr(&self) -> bool {
+        matches!(self, Self::ExprId(_))
+    }
+
     pub fn as_pat(self) -> Option<PatId> {
         match self {
             Self::PatId(v) => Some(v),
             _ => None,
         }
+    }
+
+    pub fn is_pat(&self) -> bool {
+        matches!(self, Self::PatId(_))
     }
 }
 stdx::impl_from!(ExprId, PatId for ExprOrPatId);
@@ -129,11 +141,7 @@ pub enum LiteralOrConst {
 
 impl Literal {
     pub fn negate(self) -> Option<Self> {
-        if let Literal::Int(i, k) = self {
-            Some(Literal::Int(-i, k))
-        } else {
-            None
-        }
+        if let Literal::Int(i, k) = self { Some(Literal::Int(-i, k)) } else { None }
     }
 }
 
@@ -204,7 +212,7 @@ pub enum Expr {
         statements: Box<[Statement]>,
         tail: Option<ExprId>,
     },
-    Const(ConstBlockId),
+    Const(ExprId),
     // FIXME: Fold this into Block with an unsafe flag?
     Unsafe {
         id: Option<BlockId>,
@@ -547,6 +555,9 @@ pub struct Binding {
     pub name: Name,
     pub mode: BindingAnnotation,
     pub problems: Option<BindingProblems>,
+    /// Note that this may not be the direct `SyntaxContextId` of the binding's expansion, because transparent
+    /// expansions are attributed to their parent expansion (recursively).
+    pub hygiene: HygieneId,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -571,8 +582,8 @@ pub enum Pat {
         ellipsis: bool,
     },
     Range {
-        start: Option<Box<LiteralOrConst>>,
-        end: Option<Box<LiteralOrConst>>,
+        start: Option<ExprId>,
+        end: Option<ExprId>,
     },
     Slice {
         prefix: Box<[PatId]>,

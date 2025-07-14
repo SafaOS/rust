@@ -5,7 +5,9 @@
 //!
 //! It is used like this:
 //!
-//! ```
+//! ```ignore
+//! # use hir_def::dyn_map::DynMap;
+//! # use hir_def::dyn_map::Key;
 //! // keys define submaps of a `DynMap`
 //! const STRING_TO_U32: Key<String, u32> = Key::new();
 //! const U32_TO_VEC: Key<u32, Vec<bool>> = Key::new();
@@ -25,15 +27,15 @@
 pub mod keys {
     use std::marker::PhantomData;
 
-    use hir_expand::{attrs::AttrId, MacroCallId};
+    use hir_expand::{MacroCallId, attrs::AttrId};
     use rustc_hash::FxHashMap;
-    use syntax::{ast, AstNode, AstPtr};
+    use syntax::{AstNode, AstPtr, ast};
 
     use crate::{
+        BlockId, ConstId, EnumId, EnumVariantId, ExternBlockId, ExternCrateId, FieldId, FunctionId,
+        ImplId, LifetimeParamId, Macro2Id, MacroRulesId, ProcMacroId, StaticId, StructId,
+        TraitAliasId, TraitId, TypeAliasId, TypeOrConstParamId, UnionId, UseId,
         dyn_map::{DynMap, Policy},
-        BlockId, ConstId, EnumId, EnumVariantId, ExternCrateId, FieldId, FunctionId, ImplId,
-        LifetimeParamId, Macro2Id, MacroRulesId, ProcMacroId, StaticId, StructId, TraitAliasId,
-        TraitId, TypeAliasId, TypeOrConstParamId, UnionId, UseId,
     };
 
     pub type Key<K, V> = crate::dyn_map::Key<AstPtr<K>, V, AstPtrPolicy<K, V>>;
@@ -44,6 +46,7 @@ pub mod keys {
     pub const STATIC: Key<ast::Static, StaticId> = Key::new();
     pub const TYPE_ALIAS: Key<ast::TypeAlias, TypeAliasId> = Key::new();
     pub const IMPL: Key<ast::Impl, ImplId> = Key::new();
+    pub const EXTERN_BLOCK: Key<ast::ExternBlock, ExternBlockId> = Key::new();
     pub const TRAIT: Key<ast::Trait, TraitId> = Key::new();
     pub const TRAIT_ALIAS: Key<ast::TraitAlias, TraitAliasId> = Key::new();
     pub const STRUCT: Key<ast::Struct, StructId> = Key::new();
@@ -109,6 +112,10 @@ pub struct Key<K, V, P = (K, V)> {
 }
 
 impl<K, V, P> Key<K, V, P> {
+    #[allow(
+        clippy::new_without_default,
+        reason = "this a const fn, so it can't be default yet. See <https://github.com/rust-lang/rust/issues/63065>"
+    )]
     pub(crate) const fn new() -> Key<K, V, P> {
         Key { _phantom: PhantomData }
     }
@@ -145,14 +152,9 @@ impl<K: Hash + Eq + 'static, V: 'static> Policy for (K, V) {
     }
 }
 
+#[derive(Default)]
 pub struct DynMap {
     pub(crate) map: Map,
-}
-
-impl Default for DynMap {
-    fn default() -> Self {
-        DynMap { map: Map::new() }
-    }
 }
 
 #[repr(transparent)]

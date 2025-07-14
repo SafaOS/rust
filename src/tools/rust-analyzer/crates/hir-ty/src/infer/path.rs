@@ -2,22 +2,23 @@
 
 use chalk_ir::cast::Cast;
 use hir_def::{
-    path::{Path, PathSegment},
-    resolver::{ResolveValueResult, TypeNs, ValueNs},
     AdtId, AssocItemId, GenericDefId, ItemContainerId, Lookup,
+    expr_store::path::{Path, PathSegment},
+    resolver::{ResolveValueResult, TypeNs, ValueNs},
 };
 use hir_expand::name::Name;
-use intern::sym;
 use stdx::never;
 
 use crate::{
+    InferenceDiagnostic, Interner, Substitution, TraitRef, TraitRefExt, Ty, TyBuilder, TyExt,
+    TyKind, ValueTyDefId,
     builder::ParamKind,
     consteval, error_lifetime,
     generics::generics,
     infer::diagnostics::InferenceTyLoweringContext as TyLoweringContext,
+    lower::LifetimeElisionKind,
     method_resolution::{self, VisibleFromModule},
-    to_chalk_trait_id, InferenceDiagnostic, Interner, Substitution, TraitRef, TraitRefExt, Ty,
-    TyBuilder, TyExt, TyKind, ValueTyDefId,
+    to_chalk_trait_id,
 };
 
 use super::{ExprOrPatId, InferenceContext, InferenceTyDiagnosticSource};
@@ -41,7 +42,7 @@ impl InferenceContext<'_> {
     }
 
     fn resolve_value_path(&mut self, path: &Path, id: ExprOrPatId) -> Option<ValuePathResolution> {
-        let (value, self_subst) = self.resolve_value_path_inner(path, id)?;
+        let (value, self_subst) = self.resolve_value_path_inner(path, id, false)?;
 
         let value_def: ValueTyDefId = match value {
             ValueNs::FunctionId(it) => it.into(),
@@ -64,10 +65,10 @@ impl InferenceContext<'_> {
                         never!("uninferred pattern?");
                         None
                     }
-                }
+                };
             }
             ValueNs::ImplSelf(impl_id) => {
-                let generics = crate::generics::generics(self.db.upcast(), impl_id.into());
+                let generics = crate::generics::generics(self.db, impl_id.into());
                 let substs = generics.placeholder_subst(self.db);
                 let ty = self.db.impl_self_ty(impl_id).substitute(Interner, &substs);
                 return if let Some((AdtId::StructId(struct_id), substs)) = ty.as_adt() {
@@ -82,7 +83,7 @@ impl InferenceContext<'_> {
                 };
             }
             ValueNs::GenericParam(it) => {
-                return Some(ValuePathResolution::NonGeneric(self.db.const_param_ty(it)))
+                return Some(ValuePathResolution::NonGeneric(self.db.const_param_ty(it)));
             }
         };
 
@@ -94,15 +95,20 @@ impl InferenceContext<'_> {
             return Some(ValuePathResolution::NonGeneric(ty));
         };
 
-        let substs = self.with_body_ty_lowering(|ctx| ctx.substs_from_path(path, value_def, true));
+        let substs = self.with_body_ty_lowering(|ctx| {
+            let mut path_ctx = ctx.at_path(path, id);
+            let last_segment = path.segments().len().checked_sub(1);
+            if let Some(last_segment) = last_segment {
+                path_ctx.set_current_segment(last_segment)
+            }
+            path_ctx.substs_from_path(value_def, true, false)
+        });
         let substs = substs.as_slice(Interner);
 
         if let ValueNs::EnumVariantId(_) = value {
-            let mut it = self_subst
-                .as_ref()
-                .map_or(&[][..], |s| s.as_slice(Interner))
+            let mut it = substs
                 .iter()
-                .chain(substs)
+                .chain(self_subst.as_ref().map_or(&[][..], |s| s.as_slice(Interner)))
                 .cloned();
             let builder = TyBuilder::subst_for_def(self.db, generic_def, None);
             let substs = builder
@@ -121,13 +127,13 @@ impl InferenceContext<'_> {
         }
 
         let parent_substs = self_subst.or_else(|| {
-            let generics = generics(self.db.upcast(), generic_def);
+            let generics = generics(self.db, generic_def);
             let parent_params_len = generics.parent_generics()?.len();
-            let parent_args = &substs[substs.len() - parent_params_len..];
+            let parent_args = &substs[..parent_params_len];
             Some(Substitution::from_iter(Interner, parent_args))
         });
         let parent_substs_len = parent_substs.as_ref().map_or(0, |s| s.len(Interner));
-        let mut it = substs.iter().take(substs.len() - parent_substs_len).cloned();
+        let mut it = substs.iter().skip(parent_substs_len).cloned();
         let builder = TyBuilder::subst_for_def(self.db, generic_def, parent_substs);
         let substs = builder
             .fill(|x| {
@@ -146,43 +152,95 @@ impl InferenceContext<'_> {
         &mut self,
         path: &Path,
         id: ExprOrPatId,
+        no_diagnostics: bool,
     ) -> Option<(ValueNs, Option<chalk_ir::Substitution<Interner>>)> {
         // Don't use `self.make_ty()` here as we need `orig_ns`.
         let mut ctx = TyLoweringContext::new(
             self.db,
             &self.resolver,
-            &self.body.types,
-            self.owner.into(),
+            self.body,
             &self.diagnostics,
             InferenceTyDiagnosticSource::Body,
+            self.generic_def,
+            LifetimeElisionKind::Infer,
         );
+        let mut path_ctx = if no_diagnostics {
+            ctx.at_path_forget_diagnostics(path)
+        } else {
+            ctx.at_path(path, id)
+        };
         let (value, self_subst) = if let Some(type_ref) = path.type_anchor() {
             let last = path.segments().last()?;
 
-            let (ty, orig_ns) = ctx.lower_ty_ext(type_ref);
+            let (ty, orig_ns) = path_ctx.ty_ctx().lower_ty_ext(type_ref);
             let ty = self.table.insert_type_vars(ty);
             let ty = self.table.normalize_associated_types_in(ty);
 
-            let remaining_segments_for_ty = path.segments().take(path.segments().len() - 1);
-            let (ty, _) = ctx.lower_ty_relative_path(ty, orig_ns, remaining_segments_for_ty);
-            drop(ctx);
+            path_ctx.ignore_last_segment();
+            let (ty, _) = path_ctx.lower_ty_relative_path(ty, orig_ns, true);
+            drop_ctx(ctx, no_diagnostics);
             let ty = self.table.insert_type_vars(ty);
             let ty = self.table.normalize_associated_types_in(ty);
             self.resolve_ty_assoc_item(ty, last.name, id).map(|(it, substs)| (it, Some(substs)))?
         } else {
             let hygiene = self.body.expr_or_pat_path_hygiene(id);
             // FIXME: report error, unresolved first path segment
-            let value_or_partial = ctx.resolve_path_in_value_ns(path, id, hygiene)?;
-            drop(ctx);
+            let value_or_partial = path_ctx.resolve_path_in_value_ns(hygiene)?;
 
             match value_or_partial {
-                ResolveValueResult::ValueNs(it, _) => (it, None),
-                ResolveValueResult::Partial(def, remaining_index, _) => self
-                    .resolve_assoc_item(id, def, path, remaining_index, id)
-                    .map(|(it, substs)| (it, Some(substs)))?,
+                ResolveValueResult::ValueNs(it, _) => {
+                    drop_ctx(ctx, no_diagnostics);
+                    (it, None)
+                }
+                ResolveValueResult::Partial(def, remaining_index, _) => {
+                    // there may be more intermediate segments between the resolved one and
+                    // the end. Only the last segment needs to be resolved to a value; from
+                    // the segments before that, we need to get either a type or a trait ref.
+
+                    let remaining_segments = path.segments().skip(remaining_index);
+                    let is_before_last = remaining_segments.len() == 1;
+                    let last_segment = remaining_segments
+                        .last()
+                        .expect("there should be at least one segment here");
+
+                    let (resolution, substs) = match (def, is_before_last) {
+                        (TypeNs::TraitId(trait_), true) => {
+                            let self_ty = self.table.new_type_var();
+                            let trait_ref =
+                                path_ctx.lower_trait_ref_from_resolved_path(trait_, self_ty, true);
+                            drop_ctx(ctx, no_diagnostics);
+                            self.resolve_trait_assoc_item(trait_ref, last_segment, id)
+                        }
+                        (def, _) => {
+                            // Either we already have a type (e.g. `Vec::new`), or we have a
+                            // trait but it's not the last segment, so the next segment
+                            // should resolve to an associated type of that trait (e.g. `<T
+                            // as Iterator>::Item::default`)
+                            path_ctx.ignore_last_segment();
+                            let (ty, _) = path_ctx.lower_partly_resolved_path(def, true);
+                            drop_ctx(ctx, no_diagnostics);
+                            if ty.is_unknown() {
+                                return None;
+                            }
+
+                            let ty = self.insert_type_vars(ty);
+                            let ty = self.normalize_associated_types_in(ty);
+
+                            self.resolve_ty_assoc_item(ty, last_segment.name, id)
+                        }
+                    }?;
+                    (resolution, Some(substs))
+                }
             }
         };
-        Some((value, self_subst))
+        return Some((value, self_subst));
+
+        #[inline]
+        fn drop_ctx(mut ctx: TyLoweringContext<'_>, no_diagnostics: bool) {
+            if no_diagnostics {
+                ctx.forget_diagnostics();
+            }
+        }
     }
 
     fn add_required_obligations_for_value_path(&mut self, def: GenericDefId, subst: &Substitution) {
@@ -197,101 +255,18 @@ impl InferenceContext<'_> {
 
         // We need to add `Self: Trait` obligation when `def` is a trait assoc item.
         let container = match def {
-            GenericDefId::FunctionId(id) => id.lookup(self.db.upcast()).container,
-            GenericDefId::ConstId(id) => id.lookup(self.db.upcast()).container,
+            GenericDefId::FunctionId(id) => id.lookup(self.db).container,
+            GenericDefId::ConstId(id) => id.lookup(self.db).container,
             _ => return,
         };
 
         if let ItemContainerId::TraitId(trait_) = container {
-            let param_len = generics(self.db.upcast(), def).len_self();
+            let parent_len = generics(self.db, def).parent_generics().map_or(0, |g| g.len_self());
             let parent_subst =
-                Substitution::from_iter(Interner, subst.iter(Interner).skip(param_len));
+                Substitution::from_iter(Interner, subst.iter(Interner).take(parent_len));
             let trait_ref =
                 TraitRef { trait_id: to_chalk_trait_id(trait_), substitution: parent_subst };
             self.push_obligation(trait_ref.cast(Interner));
-        }
-    }
-
-    fn resolve_assoc_item(
-        &mut self,
-        node: ExprOrPatId,
-        def: TypeNs,
-        path: &Path,
-        remaining_index: usize,
-        id: ExprOrPatId,
-    ) -> Option<(ValueNs, Substitution)> {
-        // there may be more intermediate segments between the resolved one and
-        // the end. Only the last segment needs to be resolved to a value; from
-        // the segments before that, we need to get either a type or a trait ref.
-
-        let _d;
-        let (resolved_segment, remaining_segments) = match path {
-            Path::Normal { .. } | Path::BarePath(_) => {
-                assert!(remaining_index < path.segments().len());
-                (
-                    path.segments().get(remaining_index - 1).unwrap(),
-                    path.segments().skip(remaining_index),
-                )
-            }
-            Path::LangItem(..) => (
-                PathSegment {
-                    name: {
-                        _d = Name::new_symbol_root(sym::Unknown.clone());
-                        &_d
-                    },
-                    args_and_bindings: None,
-                },
-                path.segments(),
-            ),
-        };
-        let is_before_last = remaining_segments.len() == 1;
-
-        match (def, is_before_last) {
-            (TypeNs::TraitId(trait_), true) => {
-                let segment =
-                    remaining_segments.last().expect("there should be at least one segment here");
-                let self_ty = self.table.new_type_var();
-                let trait_ref = self.with_body_ty_lowering(|ctx| {
-                    ctx.lower_trait_ref_from_resolved_path(trait_, resolved_segment, self_ty)
-                });
-                self.resolve_trait_assoc_item(trait_ref, segment, id)
-            }
-            (def, _) => {
-                // Either we already have a type (e.g. `Vec::new`), or we have a
-                // trait but it's not the last segment, so the next segment
-                // should resolve to an associated type of that trait (e.g. `<T
-                // as Iterator>::Item::default`)
-                let remaining_segments_for_ty =
-                    remaining_segments.take(remaining_segments.len() - 1);
-                let mut ctx = TyLoweringContext::new(
-                    self.db,
-                    &self.resolver,
-                    &self.body.types,
-                    self.owner.into(),
-                    &self.diagnostics,
-                    InferenceTyDiagnosticSource::Body,
-                );
-                let (ty, _) = ctx.lower_partly_resolved_path(
-                    node,
-                    def,
-                    resolved_segment,
-                    remaining_segments_for_ty,
-                    (remaining_index - 1) as u32,
-                    true,
-                );
-                drop(ctx);
-                if ty.is_unknown() {
-                    return None;
-                }
-
-                let ty = self.insert_type_vars(ty);
-                let ty = self.normalize_associated_types_in(ty);
-
-                let segment =
-                    remaining_segments.last().expect("there should be at least one segment here");
-
-                self.resolve_ty_assoc_item(ty, segment.name, id)
-            }
         }
     }
 
@@ -303,10 +278,10 @@ impl InferenceContext<'_> {
     ) -> Option<(ValueNs, Substitution)> {
         let trait_ = trait_ref.hir_trait_id();
         let item =
-            self.db.trait_data(trait_).items.iter().map(|(_name, id)| *id).find_map(|item| {
+            self.db.trait_items(trait_).items.iter().map(|(_name, id)| *id).find_map(|item| {
                 match item {
                     AssocItemId::FunctionId(func) => {
-                        if segment.name == &self.db.function_data(func).name {
+                        if segment.name == &self.db.function_signature(func).name {
                             Some(AssocItemId::FunctionId(func))
                         } else {
                             None
@@ -314,7 +289,7 @@ impl InferenceContext<'_> {
                     }
 
                     AssocItemId::ConstId(konst) => {
-                        if self.db.const_data(konst).name.as_ref() == Some(segment.name) {
+                        if self.db.const_signature(konst).name.as_ref() == Some(segment.name) {
                             Some(AssocItemId::ConstId(konst))
                         } else {
                             None
@@ -376,10 +351,8 @@ impl InferenceContext<'_> {
         let (item, visible) = res?;
 
         let (def, container) = match item {
-            AssocItemId::FunctionId(f) => {
-                (ValueNs::FunctionId(f), f.lookup(self.db.upcast()).container)
-            }
-            AssocItemId::ConstId(c) => (ValueNs::ConstId(c), c.lookup(self.db.upcast()).container),
+            AssocItemId::FunctionId(f) => (ValueNs::FunctionId(f), f.lookup(self.db).container),
+            AssocItemId::ConstId(c) => (ValueNs::ConstId(c), c.lookup(self.db).container),
             AssocItemId::TypeAliasId(_) => unreachable!(),
         };
         let substs = match container {
@@ -424,7 +397,7 @@ impl InferenceContext<'_> {
             Some((AdtId::EnumId(e), subst)) => (e, subst),
             _ => return None,
         };
-        let enum_data = self.db.enum_data(enum_id);
+        let enum_data = self.db.enum_variants(enum_id);
         let variant = enum_data.variant(name)?;
         self.write_variant_resolution(id, variant.into());
         Some((ValueNs::EnumVariantId(variant), subst.clone()))

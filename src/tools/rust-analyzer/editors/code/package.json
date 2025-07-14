@@ -7,6 +7,7 @@
     "version": "0.5.0-dev",
     "releaseTag": null,
     "publisher": "rust-lang",
+    "type": "commonjs",
     "repository": {
         "url": "https://github.com/rust-lang/rust-analyzer.git",
         "type": "git"
@@ -27,45 +28,51 @@
         }
     },
     "engines": {
-        "vscode": "^1.83.0"
+        "vscode": "^1.93.0"
     },
     "enabledApiProposals": [],
     "scripts": {
         "vscode:prepublish": "npm run build-base -- --minify",
         "package": "vsce package -o rust-analyzer.vsix",
-        "build-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node --target=node16",
+        "build-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node --target=node20",
         "build": "npm run build-base -- --sourcemap",
         "watch": "npm run build-base -- --sourcemap --watch",
-        "format": "prettier --write .",
-        "format:check": "prettier --check .",
-        "lint": "eslint -c .eslintrc.js --ext ts ./src ./tests",
+        "format": "node --experimental-strip-types node_modules/prettier/bin/prettier.cjs . --write",
+        "format:check": "node --experimental-strip-types node_modules/prettier/bin/prettier.cjs . --check",
+        "lint": "eslint .",
         "lint:fix": "npm run lint -- --fix",
         "typecheck": "tsc",
         "pretest": "npm run typecheck && npm run build",
         "test": "node ./out/tests/runTests.js"
     },
     "dependencies": {
-        "@hpcc-js/wasm": "^2.13.0",
-        "anser": "^2.1.1",
-        "d3": "^7.8.5",
-        "d3-graphviz": "^5.0.2",
+        "@hpcc-js/wasm": "^2.22.4",
+        "anser": "^2.3.2",
+        "d3": "^7.9.0",
+        "d3-graphviz": "^5.6.0",
+        "jiti": "^2.4.2",
         "vscode-languageclient": "^9.0.1"
     },
     "devDependencies": {
-        "@tsconfig/strictest": "^2.0.1",
-        "@types/node": "~16.11.7",
-        "@types/vscode": "~1.83",
-        "@typescript-eslint/eslint-plugin": "^6.0.0",
-        "@typescript-eslint/parser": "^6.0.0",
-        "@vscode/test-electron": "^2.3.8",
-        "@vscode/vsce": "^3.0.0",
-        "esbuild": "^0.18.12",
-        "eslint": "^8.44.0",
-        "eslint-config-prettier": "^8.8.0",
-        "ovsx": "^0.8.2",
-        "prettier": "^3.0.0",
-        "tslib": "^2.6.0",
-        "typescript": "^5.6.0"
+        "@eslint/js": "^9.21.0",
+        "@stylistic/eslint-plugin": "^4.1.0",
+        "@stylistic/eslint-plugin-js": "^4.1.0",
+        "@tsconfig/strictest": "^2.0.5",
+        "@types/node": "~22.13.4",
+        "@types/vscode": "~1.93.0",
+        "@typescript-eslint/eslint-plugin": "^8.25.0",
+        "@typescript-eslint/parser": "^8.25.0",
+        "@vscode/test-electron": "^2.4.1",
+        "@vscode/vsce": "^3.2.2",
+        "esbuild": "^0.25.0",
+        "eslint": "^9.21.0",
+        "eslint-config-prettier": "^10.0.2",
+        "eslint-define-config": "^2.1.0",
+        "ovsx": "0.10.1",
+        "prettier": "^3.5.2",
+        "tslib": "^2.8.1",
+        "typescript": "^5.7.3",
+        "typescript-eslint": "^8.25.0"
     },
     "activationEvents": [
         "workspaceContains:Cargo.toml",
@@ -161,6 +168,11 @@
             {
                 "command": "rust-analyzer.parentModule",
                 "title": "Locate parent module",
+                "category": "rust-analyzer"
+            },
+            {
+                "command": "rust-analyzer.childModules",
+                "title": "Locate child modules",
                 "category": "rust-analyzer"
             },
             {
@@ -531,7 +543,8 @@
                         "additionalProperties": {
                             "type": [
                                 "string",
-                                "number"
+                                "number",
+                                "null"
                             ]
                         },
                         "default": null,
@@ -598,11 +611,6 @@
                         "default": {
                             "/rustc/<id>": "${env:USERPROFILE}/.rustup/toolchains/<toolchain-id>/lib/rustlib/src/rust"
                         }
-                    },
-                    "rust-analyzer.debug.openDebugPane": {
-                        "markdownDescription": "Whether to open up the `Debug Panel` on debugging start.",
-                        "type": "boolean",
-                        "default": false
                     },
                     "rust-analyzer.debug.buildBeforeRestart": {
                         "markdownDescription": "Whether to rebuild the project modules before debugging the same test again",
@@ -818,7 +826,7 @@
                 "title": "cargo",
                 "properties": {
                     "rust-analyzer.cargo.cfgs": {
-                        "markdownDescription": "List of cfg options to enable with the given values.",
+                        "markdownDescription": "List of cfg options to enable with the given values.\n\nTo enable a name without a value, use `\"key\"`.\nTo enable a name with a value, use `\"key=value\"`.\nTo disable, prefix the entry with a `!`.",
                         "default": [
                             "debug_assertions",
                             "miri"
@@ -884,6 +892,16 @@
                 "properties": {
                     "rust-analyzer.cargo.noDefaultFeatures": {
                         "markdownDescription": "Whether to pass `--no-default-features` to cargo.",
+                        "default": false,
+                        "type": "boolean"
+                    }
+                }
+            },
+            {
+                "title": "cargo",
+                "properties": {
+                    "rust-analyzer.cargo.noDeps": {
+                        "markdownDescription": "Whether to skip fetching dependencies. If set to \"true\", the analysis is performed\nentirely offline, and Cargo metadata for dependencies is not fetched.",
                         "default": false,
                         "type": "boolean"
                     }
@@ -1473,8 +1491,8 @@
             {
                 "title": "files",
                 "properties": {
-                    "rust-analyzer.files.excludeDirs": {
-                        "markdownDescription": "These directories will be ignored by rust-analyzer. They are\nrelative to the workspace root, and globs are not supported. You may\nalso need to add the folders to Code's `files.watcherExclude`.",
+                    "rust-analyzer.files.exclude": {
+                        "markdownDescription": "These paths (file/directories) will be ignored by rust-analyzer. They are\nrelative to the workspace root, and globs are not supported. You may\nalso need to add the folders to Code's `files.watcherExclude`.",
                         "default": [],
                         "type": "array",
                         "items": {
@@ -1636,6 +1654,16 @@
                 "properties": {
                     "rust-analyzer.hover.documentation.keywords.enable": {
                         "markdownDescription": "Whether to show keyword hover popups. Only applies when\n`#rust-analyzer.hover.documentation.enable#` is set.",
+                        "default": true,
+                        "type": "boolean"
+                    }
+                }
+            },
+            {
+                "title": "hover",
+                "properties": {
+                    "rust-analyzer.hover.dropGlue.enable": {
+                        "markdownDescription": "Whether to show drop glue information on hover.",
                         "default": true,
                         "type": "boolean"
                     }
@@ -1858,7 +1886,7 @@
                 "title": "imports",
                 "properties": {
                     "rust-analyzer.imports.group.enable": {
-                        "markdownDescription": "Group inserted imports by the [following order](https://rust-analyzer.github.io/manual.html#auto-import). Groups are separated by newlines.",
+                        "markdownDescription": "Group inserted imports by the [following order](https://rust-analyzer.github.io/book/features.html#auto-import). Groups are separated by newlines.",
                         "default": true,
                         "type": "boolean"
                     }
@@ -2806,7 +2834,7 @@
                 "title": "workspace",
                 "properties": {
                     "rust-analyzer.workspace.discoverConfig": {
-                        "markdownDescription": "Enables automatic discovery of projects using [`DiscoverWorkspaceConfig::command`].\n\n[`DiscoverWorkspaceConfig`] also requires setting `progress_label` and `files_to_watch`.\n`progress_label` is used for the title in progress indicators, whereas `files_to_watch`\nis used to determine which build system-specific files should be watched in order to\nreload rust-analyzer.\n\nBelow is an example of a valid configuration:\n```json\n\"rust-analyzer.workspace.discoverConfig\": {\n        \"command\": [\n                \"rust-project\",\n                \"develop-json\"\n        ],\n        \"progressLabel\": \"rust-analyzer\",\n        \"filesToWatch\": [\n                \"BUCK\"\n        ]\n}\n```\n\n## On `DiscoverWorkspaceConfig::command`\n\n**Warning**: This format is provisional and subject to change.\n\n[`DiscoverWorkspaceConfig::command`] *must* return a JSON object\ncorresponding to `DiscoverProjectData::Finished`:\n\n```norun\n#[derive(Debug, Clone, Deserialize, Serialize)]\n#[serde(tag = \"kind\")]\n#[serde(rename_all = \"snake_case\")]\nenum DiscoverProjectData {\n        Finished { buildfile: Utf8PathBuf, project: ProjectJsonData },\n        Error { error: String, source: Option<String> },\n        Progress { message: String },\n}\n```\n\nAs JSON, `DiscoverProjectData::Finished` is:\n\n```json\n{\n        // the internally-tagged representation of the enum.\n        \"kind\": \"finished\",\n        // the file used by a non-Cargo build system to define\n        // a package or target.\n        \"buildfile\": \"rust-analyzer/BUILD\",\n        // the contents of a rust-project.json, elided for brevity\n        \"project\": {\n                \"sysroot\": \"foo\",\n                \"crates\": []\n        }\n}\n```\n\nIt is encouraged, but not required, to use the other variants on\n`DiscoverProjectData` to provide a more polished end-user experience.\n\n`DiscoverWorkspaceConfig::command` may *optionally* include an `{arg}`,\nwhich will be substituted with the JSON-serialized form of the following\nenum:\n\n```norun\n#[derive(PartialEq, Clone, Debug, Serialize)]\n#[serde(rename_all = \"camelCase\")]\npub enum DiscoverArgument {\n     Path(AbsPathBuf),\n     Buildfile(AbsPathBuf),\n}\n```\n\nThe JSON representation of `DiscoverArgument::Path` is:\n\n```json\n{\n        \"path\": \"src/main.rs\"\n}\n```\n\nSimilarly, the JSON representation of `DiscoverArgument::Buildfile` is:\n\n```\n{\n        \"buildfile\": \"BUILD\"\n}\n```\n\n`DiscoverArgument::Path` is used to find and generate a `rust-project.json`,\nand therefore, a workspace, whereas `DiscoverArgument::buildfile` is used to\nto update an existing workspace. As a reference for implementors,\nbuck2's `rust-project` will likely be useful:\nhttps://github.com/facebook/buck2/tree/main/integrations/rust-project.",
+                        "markdownDescription": "Enables automatic discovery of projects using [`DiscoverWorkspaceConfig::command`].\n\n[`DiscoverWorkspaceConfig`] also requires setting `progress_label` and `files_to_watch`.\n`progress_label` is used for the title in progress indicators, whereas `files_to_watch`\nis used to determine which build system-specific files should be watched in order to\nreload rust-analyzer.\n\nBelow is an example of a valid configuration:\n```json\n\"rust-analyzer.workspace.discoverConfig\": {\n        \"command\": [\n                \"rust-project\",\n                \"develop-json\"\n        ],\n        \"progressLabel\": \"rust-analyzer\",\n        \"filesToWatch\": [\n                \"BUCK\"\n        ]\n}\n```\n\n## On `DiscoverWorkspaceConfig::command`\n\n**Warning**: This format is provisional and subject to change.\n\n[`DiscoverWorkspaceConfig::command`] *must* return a JSON object\ncorresponding to `DiscoverProjectData::Finished`:\n\n```norun\n#[derive(Debug, Clone, Deserialize, Serialize)]\n#[serde(tag = \"kind\")]\n#[serde(rename_all = \"snake_case\")]\nenum DiscoverProjectData {\n        Finished { buildfile: Utf8PathBuf, project: ProjectJsonData },\n        Error { error: String, source: Option<String> },\n        Progress { message: String },\n}\n```\n\nAs JSON, `DiscoverProjectData::Finished` is:\n\n```json\n{\n        // the internally-tagged representation of the enum.\n        \"kind\": \"finished\",\n        // the file used by a non-Cargo build system to define\n        // a package or target.\n        \"buildfile\": \"rust-analyzer/BUILD\",\n        // the contents of a rust-project.json, elided for brevity\n        \"project\": {\n                \"sysroot\": \"foo\",\n                \"crates\": []\n        }\n}\n```\n\nIt is encouraged, but not required, to use the other variants on\n`DiscoverProjectData` to provide a more polished end-user experience.\n\n`DiscoverWorkspaceConfig::command` may *optionally* include an `{arg}`,\nwhich will be substituted with the JSON-serialized form of the following\nenum:\n\n```norun\n#[derive(PartialEq, Clone, Debug, Serialize)]\n#[serde(rename_all = \"camelCase\")]\npub enum DiscoverArgument {\n     Path(AbsPathBuf),\n     Buildfile(AbsPathBuf),\n}\n```\n\nThe JSON representation of `DiscoverArgument::Path` is:\n\n```json\n{\n        \"path\": \"src/main.rs\"\n}\n```\n\nSimilarly, the JSON representation of `DiscoverArgument::Buildfile` is:\n\n```json\n{\n        \"buildfile\": \"BUILD\"\n}\n```\n\n`DiscoverArgument::Path` is used to find and generate a `rust-project.json`,\nand therefore, a workspace, whereas `DiscoverArgument::buildfile` is used to\nto update an existing workspace. As a reference for implementors,\nbuck2's `rust-project` will likely be useful:\nhttps://github.com/facebook/buck2/tree/main/integrations/rust-project.",
                         "default": null,
                         "anyOf": [
                             {
@@ -3352,6 +3380,10 @@
                     "when": "inRustProject"
                 },
                 {
+                    "command": "rust-analyzer.childModules",
+                    "when": "inRustProject"
+                },
+                {
                     "command": "rust-analyzer.joinLines",
                     "when": "inRustProject"
                 },
@@ -3471,6 +3503,7 @@
         "views": {
             "explorer": [
                 {
+                    "icon": "$(package)",
                     "id": "rustDependencies",
                     "name": "Rust Dependencies",
                     "when": "inRustProject && config.rust-analyzer.showDependenciesExplorer"
@@ -3478,6 +3511,7 @@
             ],
             "rustSyntaxTreeContainer": [
                 {
+                    "icon": "$(file-code)",
                     "id": "rustSyntaxTree",
                     "name": "Rust Syntax Tree",
                     "when": "inRustProject && config.rust-analyzer.showSyntaxTree"
@@ -3520,13 +3554,13 @@
                     {
                         "id": "docs",
                         "title": "Visit the docs!",
-                        "description": "Confused about configurations? Want to learn more about rust-analyzer? Visit the [User Manual](https://rust-analyzer.github.io/manual.html)!",
+                        "description": "Confused about configurations? Want to learn more about rust-analyzer? Visit the [User Manual](https://rust-analyzer.github.io/book/)!",
                         "media": {
                             "image": "./icon.png",
                             "altText": "rust-analyzer logo"
                         },
                         "completionEvents": [
-                            "onLink:https://rust-analyzer.github.io/manual.html"
+                            "onLink:https://rust-analyzer.github.io/book/"
                         ]
                     },
                     {

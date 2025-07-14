@@ -3,25 +3,21 @@ use std::{fmt, iter, mem};
 use itertools::Itertools;
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_errors::codes::*;
-use rustc_errors::{
-    Applicability, Diag, ErrorGuaranteed, MultiSpan, StashKey, a_or_an, listify, pluralize,
-};
+use rustc_errors::{Applicability, Diag, ErrorGuaranteed, MultiSpan, a_or_an, listify, pluralize};
 use rustc_hir::def::{CtorOf, DefKind, Res};
 use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::{ExprKind, HirId, Node, QPath};
-use rustc_hir_analysis::check::intrinsicck::InlineAsmCtxt;
 use rustc_hir_analysis::check::potentially_plural_count;
 use rustc_hir_analysis::hir_ty_lowering::HirTyLowerer;
 use rustc_index::IndexVec;
 use rustc_infer::infer::{DefineOpaqueTypes, InferOk, TypeTrace};
 use rustc_middle::ty::adjustment::AllowTwoPhase;
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::visit::TypeVisitableExt;
-use rustc_middle::ty::{self, IsSuggestable, Ty, TyCtxt};
+use rustc_middle::ty::{self, IsSuggestable, Ty, TyCtxt, TypeVisitableExt};
 use rustc_middle::{bug, span_bug};
 use rustc_session::Session;
-use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
+use rustc_span::{DUMMY_SP, Ident, Span, kw, sym};
 use rustc_trait_selection::error_reporting::infer::{FailureCode, ObligationCauseExt};
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::{self, ObligationCauseCode, ObligationCtxt, SelectionContext};
@@ -36,13 +32,13 @@ use crate::errors::SuggestPtrNullMut;
 use crate::fn_ctxt::arg_matrix::{ArgMatrix, Compatibility, Error, ExpectedIdx, ProvidedIdx};
 use crate::fn_ctxt::infer::FnCall;
 use crate::gather_locals::Declaration;
-use crate::method::MethodCallee;
+use crate::inline_asm::InlineAsmCtxt;
 use crate::method::probe::IsSuggestion;
 use crate::method::probe::Mode::MethodCall;
 use crate::method::probe::ProbeScope::TraitsInScope;
 use crate::{
-    BreakableCtxt, Diverges, Expectation, FnCtxt, LoweredTy, Needs, TupleArgumentsFlag, errors,
-    struct_span_code_err,
+    BreakableCtxt, Diverges, Expectation, FnCtxt, GatherLocalsVisitor, LoweredTy, Needs,
+    TupleArgumentsFlag, errors, struct_span_code_err,
 };
 
 rustc_index::newtype_index! {
@@ -100,78 +96,34 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let mut deferred_asm_checks = self.deferred_asm_checks.borrow_mut();
         debug!("FnCtxt::check_asm: {} deferred checks", deferred_asm_checks.len());
         for (asm, hir_id) in deferred_asm_checks.drain(..) {
-            let enclosing_id = self.tcx.hir().enclosing_body_owner(hir_id);
-            let get_operand_ty = |expr| {
-                let ty = self.typeck_results.borrow().expr_ty_adjusted(expr);
-                let ty = self.resolve_vars_if_possible(ty);
-                if ty.has_non_region_infer() {
-                    Ty::new_misc_error(self.tcx)
-                } else {
-                    self.tcx.erase_regions(ty)
-                }
-            };
-            InlineAsmCtxt::new_in_fn(
-                self.tcx,
-                self.infcx.typing_env(self.param_env),
-                get_operand_ty,
-            )
-            .check_asm(asm, enclosing_id);
+            let enclosing_id = self.tcx.hir_enclosing_body_owner(hir_id);
+            InlineAsmCtxt::new(self, enclosing_id).check_asm(asm);
         }
     }
 
-    pub(in super::super) fn check_method_argument_types(
-        &self,
-        sp: Span,
-        expr: &'tcx hir::Expr<'tcx>,
-        method: Result<MethodCallee<'tcx>, ErrorGuaranteed>,
-        args_no_rcvr: &'tcx [hir::Expr<'tcx>],
-        tuple_arguments: TupleArgumentsFlag,
-        expected: Expectation<'tcx>,
-    ) -> Ty<'tcx> {
-        let has_error = match method {
-            Ok(method) => method.args.error_reported().and(method.sig.error_reported()),
-            Err(guar) => Err(guar),
-        };
-        if let Err(guar) = has_error {
-            let err_inputs = self.err_args(
-                method.map_or(args_no_rcvr.len(), |method| method.sig.inputs().len() - 1),
-                guar,
-            );
-            let err_output = Ty::new_error(self.tcx, guar);
+    pub(in super::super) fn check_repeat_exprs(&self) {
+        let mut deferred_repeat_expr_checks = self.deferred_repeat_expr_checks.borrow_mut();
+        debug!("FnCtxt::check_repeat_exprs: {} deferred checks", deferred_repeat_expr_checks.len());
+        for (element, element_ty, count) in deferred_repeat_expr_checks.drain(..) {
+            // We want to emit an error if the const is not structurally resolveable as otherwise
+            // we can find up conservatively proving `Copy` which may infer the repeat expr count
+            // to something that never required `Copy` in the first place.
+            let count =
+                self.structurally_resolve_const(element.span, self.normalize(element.span, count));
 
-            let err_inputs = match tuple_arguments {
-                DontTupleArguments => err_inputs,
-                TupleArguments => vec![Ty::new_tup(self.tcx, &err_inputs)],
-            };
+            // Avoid run on "`NotCopy: Copy` is not implemented" errors when the repeat expr count
+            // is erroneous/unknown. The user might wind up specifying a repeat count of 0/1.
+            if count.references_error() {
+                continue;
+            }
 
-            self.check_argument_types(
-                sp,
-                expr,
-                &err_inputs,
-                err_output,
-                NoExpectation,
-                args_no_rcvr,
-                false,
-                tuple_arguments,
-                method.ok().map(|method| method.def_id),
-            );
-            return err_output;
+            // If the length is 0, we don't create any elements, so we don't copy any.
+            // If the length is 1, we don't copy that one element, we move it. Only check
+            // for `Copy` if the length is larger.
+            if count.try_to_target_usize(self.tcx).is_none_or(|x| x > 1) {
+                self.enforce_repeat_element_needs_copy_bound(element, element_ty);
+            }
         }
-
-        let method = method.unwrap();
-        self.check_argument_types(
-            sp,
-            expr,
-            &method.sig.inputs()[1..],
-            method.sig.output(),
-            expected,
-            args_no_rcvr,
-            method.sig.c_variadic,
-            tuple_arguments,
-            Some(method.def_id),
-        );
-
-        method.sig.output()
     }
 
     /// Generic function that factors out common logic from function calls,
@@ -602,7 +554,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if let Some((DefKind::AssocFn, def_id)) =
                     self.typeck_results.borrow().type_dependent_def(call_expr.hir_id)
                     && let Some(assoc) = tcx.opt_associated_item(def_id)
-                    && assoc.fn_has_self_parameter
+                    && assoc.is_method()
                 {
                     Some(*receiver)
                 } else {
@@ -628,8 +580,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     TraitsInScope,
                     |mut ctxt| ctxt.probe_for_similar_candidate(),
                 )
-                && let ty::AssocKind::Fn = assoc.kind
-                && assoc.fn_has_self_parameter
+                && assoc.is_method()
             {
                 let args = self.infcx.fresh_args_for_item(call_name.span, assoc.def_id);
                 let fn_sig = tcx.fn_sig(assoc.def_id).instantiate(tcx, args);
@@ -670,10 +621,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     .all(|(expected, found)| self.may_coerce(*expected, *found))
                 && fn_sig.inputs()[1..].len() == input_types.len()
             {
+                let assoc_name = assoc.name();
                 err.span_suggestion_verbose(
                     call_name.span,
-                    format!("you might have meant to use `{}`", assoc.name),
-                    assoc.name,
+                    format!("you might have meant to use `{}`", assoc_name),
+                    assoc_name,
                     Applicability::MaybeIncorrect,
                 );
                 return;
@@ -693,7 +645,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     tcx.def_span(assoc.def_id),
                     format!(
                         "there's is a method with similar name `{}`, but the arguments don't match",
-                        assoc.name,
+                        assoc.name(),
                     ),
                 );
                 return;
@@ -705,7 +657,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     format!(
                         "there's is a method with similar name `{}`, but their argument count \
                          doesn't match",
-                        assoc.name,
+                        assoc.name(),
                     ),
                 );
                 return;
@@ -780,7 +732,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         // First, check if we just need to wrap some arguments in a tuple.
         if let Some((mismatch_idx, terr)) =
-            compatibility_diagonal.iter().enumerate().find_map(|(i, c)| {
+            compatibility_diagonal.iter_enumerated().find_map(|(i, c)| {
                 if let Compatibility::Incompatible(Some(terr)) = c {
                     Some((i, *terr))
                 } else {
@@ -792,24 +744,25 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // Do we have as many extra provided arguments as the tuple's length?
             // If so, we might have just forgotten to wrap some args in a tuple.
             if let Some(ty::Tuple(tys)) =
-                formal_and_expected_inputs.get(mismatch_idx.into()).map(|tys| tys.1.kind())
+                formal_and_expected_inputs.get(mismatch_idx.to_expected_idx()).map(|tys| tys.1.kind())
                 // If the tuple is unit, we're not actually wrapping any arguments.
                 && !tys.is_empty()
                 && provided_arg_tys.len() == formal_and_expected_inputs.len() - 1 + tys.len()
             {
                 // Wrap up the N provided arguments starting at this position in a tuple.
-                let provided_as_tuple = Ty::new_tup_from_iter(
-                    tcx,
-                    provided_arg_tys.iter().map(|(ty, _)| *ty).skip(mismatch_idx).take(tys.len()),
-                );
+                let provided_args_to_tuple = &provided_arg_tys[mismatch_idx..];
+                let (provided_args_to_tuple, provided_args_after_tuple) =
+                    provided_args_to_tuple.split_at(tys.len());
+                let provided_as_tuple =
+                    Ty::new_tup_from_iter(tcx, provided_args_to_tuple.iter().map(|&(ty, _)| ty));
 
                 let mut satisfied = true;
                 // Check if the newly wrapped tuple + rest of the arguments are compatible.
                 for ((_, expected_ty), provided_ty) in std::iter::zip(
-                    formal_and_expected_inputs.iter().skip(mismatch_idx),
-                    [provided_as_tuple].into_iter().chain(
-                        provided_arg_tys.iter().map(|(ty, _)| *ty).skip(mismatch_idx + tys.len()),
-                    ),
+                    formal_and_expected_inputs[mismatch_idx.to_expected_idx()..].iter(),
+                    [provided_as_tuple]
+                        .into_iter()
+                        .chain(provided_args_after_tuple.iter().map(|&(ty, _)| ty)),
                 ) {
                     if !self.may_coerce(provided_ty, *expected_ty) {
                         satisfied = false;
@@ -821,10 +774,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // Take some care with spans, so we don't suggest wrapping a macro's
                 // innards in parenthesis, for example.
                 if satisfied
-                    && let Some((_, lo)) =
-                        provided_arg_tys.get(ProvidedIdx::from_usize(mismatch_idx))
-                    && let Some((_, hi)) =
-                        provided_arg_tys.get(ProvidedIdx::from_usize(mismatch_idx + tys.len() - 1))
+                    && let &[(_, hi @ lo)] | &[(_, lo), .., (_, hi)] = provided_args_to_tuple
                 {
                     let mut err;
                     if tys.len() == 1 {
@@ -832,9 +782,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         // so don't do anything special here.
                         err = self.err_ctxt().report_and_explain_type_error(
                             mk_trace(
-                                *lo,
-                                formal_and_expected_inputs[mismatch_idx.into()],
-                                provided_arg_tys[mismatch_idx.into()].0,
+                                lo,
+                                formal_and_expected_inputs[mismatch_idx.to_expected_idx()],
+                                provided_arg_tys[mismatch_idx].0,
                             ),
                             self.param_env,
                             terr,
@@ -873,7 +823,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         callee_ty,
                         call_expr,
                         None,
-                        Some(mismatch_idx),
+                        Some(mismatch_idx.as_usize()),
                         &matched_inputs,
                         &formal_and_expected_inputs,
                         is_method,
@@ -913,7 +863,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         let detect_dotdot = |err: &mut Diag<'_>, ty: Ty<'_>, expr: &hir::Expr<'_>| {
             if let ty::Adt(adt, _) = ty.kind()
-                && self.tcx().lang_items().get(hir::LangItem::RangeFull) == Some(adt.did())
+                && self.tcx().is_lang_item(adt.did(), hir::LangItem::RangeFull)
                 && let hir::ExprKind::Struct(
                     hir::QPath::LangItem(hir::LangItem::RangeFull, _),
                     [],
@@ -1123,8 +1073,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 && self.tcx.def_kind(fn_def_id).is_fn_like()
                 && let self_implicit =
                     matches!(call_expr.kind, hir::ExprKind::MethodCall(..)) as usize
-                && let Some(arg) =
-                    self.tcx.fn_arg_names(fn_def_id).get(expected_idx.as_usize() + self_implicit)
+                && let Some(Some(arg)) =
+                    self.tcx.fn_arg_idents(fn_def_id).get(expected_idx.as_usize() + self_implicit)
                 && arg.name != kw::SelfLower
             {
                 format!("/* {} */", arg.name)
@@ -1623,7 +1573,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             ast::LitKind::Char(_) => tcx.types.char,
             ast::LitKind::Int(_, ast::LitIntType::Signed(t)) => Ty::new_int(tcx, ty::int_ty(t)),
             ast::LitKind::Int(_, ast::LitIntType::Unsigned(t)) => Ty::new_uint(tcx, ty::uint_ty(t)),
-            ast::LitKind::Int(_, ast::LitIntType::Unsuffixed) => {
+            ast::LitKind::Int(i, ast::LitIntType::Unsuffixed) => {
                 let opt_ty = expected.to_option(self).and_then(|ty| match ty.kind() {
                     ty::Int(_) | ty::Uint(_) => Some(ty),
                     // These exist to direct casts like `0x61 as char` to use
@@ -1632,6 +1582,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     ty::Char => Some(tcx.types.u8),
                     ty::RawPtr(..) => Some(tcx.types.usize),
                     ty::FnDef(..) | ty::FnPtr(..) => Some(tcx.types.usize),
+                    &ty::Pat(base, _) if base.is_integral() => {
+                        let layout = tcx
+                            .layout_of(self.typing_env(self.param_env).as_query_input(ty))
+                            .ok()?;
+                        assert!(!layout.uninhabited);
+
+                        match layout.backend_repr {
+                            rustc_abi::BackendRepr::Scalar(scalar) => {
+                                scalar.valid_range(&tcx).contains(u128::from(i.get())).then_some(ty)
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                     _ => None,
                 });
                 opt_ty.unwrap_or_else(|| self.next_int_var())
@@ -1802,6 +1765,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
     /// Type check a `let` statement.
     fn check_decl_local(&self, local: &'tcx hir::LetStmt<'tcx>) {
+        GatherLocalsVisitor::gather_from_local(self, local);
+
         let ty = self.check_decl(local.into());
         self.write_ty(local.hir_id, ty);
         if local.pat.is_never_pattern() {
@@ -2052,11 +2017,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     fn parent_item_span(&self, id: HirId) -> Option<Span> {
-        let node = self.tcx.hir_node_by_def_id(self.tcx.hir().get_parent_item(id).def_id);
+        let node = self.tcx.hir_node_by_def_id(self.tcx.hir_get_parent_item(id).def_id);
         match node {
             Node::Item(&hir::Item { kind: hir::ItemKind::Fn { body: body_id, .. }, .. })
             | Node::ImplItem(&hir::ImplItem { kind: hir::ImplItemKind::Fn(_, body_id), .. }) => {
-                let body = self.tcx.hir().body(body_id);
+                let body = self.tcx.hir_body(body_id);
                 if let ExprKind::Block(block, _) = &body.value.kind {
                     return Some(block.span);
                 }
@@ -2148,7 +2113,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                 let result = self
                     .lowerer()
-                    .lower_assoc_path(hir_id, path_span, ty.raw, qself, segment, true);
+                    .lower_assoc_path_ty(hir_id, path_span, ty.raw, qself, segment, true);
                 let ty = result
                     .map(|(ty, _, _)| ty)
                     .unwrap_or_else(|guar| Ty::new_error(self.tcx(), guar));
@@ -2164,62 +2129,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let (res, ty) = self.resolve_lang_item_path(lang_item, span, hir_id);
                 (res, LoweredTy::from_raw(self, path_span, ty))
             }
-        }
-    }
-
-    pub(super) fn collect_unused_stmts_for_coerce_return_ty(
-        &self,
-        errors_causecode: Vec<(Span, ObligationCauseCode<'tcx>)>,
-    ) {
-        for (span, code) in errors_causecode {
-            self.dcx().try_steal_modify_and_emit_err(span, StashKey::MaybeForgetReturn, |err| {
-                if let Some(fn_sig) = self.body_fn_sig()
-                    && let ObligationCauseCode::WhereClauseInExpr(_, _, binding_hir_id, ..) = code
-                    && !fn_sig.output().is_unit()
-                {
-                    let mut block_num = 0;
-                    let mut found_semi = false;
-                    for (hir_id, node) in self.tcx.hir().parent_iter(binding_hir_id) {
-                        // Don't proceed into parent bodies
-                        if hir_id.owner != binding_hir_id.owner {
-                            break;
-                        }
-                        match node {
-                            hir::Node::Stmt(stmt) => {
-                                if let hir::StmtKind::Semi(expr) = stmt.kind {
-                                    let expr_ty = self.typeck_results.borrow().expr_ty(expr);
-                                    let return_ty = fn_sig.output();
-                                    if !matches!(expr.kind, hir::ExprKind::Ret(..))
-                                        && self.may_coerce(expr_ty, return_ty)
-                                    {
-                                        found_semi = true;
-                                    }
-                                }
-                            }
-                            hir::Node::Block(_block) => {
-                                if found_semi {
-                                    block_num += 1;
-                                }
-                            }
-                            hir::Node::Item(item) => {
-                                if let hir::ItemKind::Fn { .. } = item.kind {
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if block_num > 1 && found_semi {
-                        err.span_suggestion_verbose(
-                            // use the span of the *whole* expr
-                            self.tcx.hir().span(binding_hir_id).shrink_to_lo(),
-                            "you might have meant to return this to infer its type parameters",
-                            "return ",
-                            Applicability::MaybeIncorrect,
-                        );
-                    }
-                }
-            });
         }
     }
 
@@ -2512,16 +2421,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
             }
             err.span_note(spans, format!("{} defined here", self.tcx.def_descr(def_id)));
-        } else if let Some(hir::Node::Expr(e)) = self.tcx.hir().get_if_local(def_id)
+        } else if let Some(hir::Node::Expr(e)) = self.tcx.hir_get_if_local(def_id)
             && let hir::ExprKind::Closure(hir::Closure { body, .. }) = &e.kind
         {
             let param = expected_idx
-                .and_then(|expected_idx| self.tcx.hir().body(*body).params.get(expected_idx));
+                .and_then(|expected_idx| self.tcx.hir_body(*body).params.get(expected_idx));
             let (kind, span) = if let Some(param) = param {
                 // Try to find earlier invocations of this closure to find if the type mismatch
                 // is because of inference. If we find one, point at them.
                 let mut call_finder = FindClosureArg { tcx: self.tcx, calls: vec![] };
-                let parent_def_id = self.tcx.hir().get_parent_item(call_expr.hir_id).def_id;
+                let parent_def_id = self.tcx.hir_get_parent_item(call_expr.hir_id).def_id;
                 match self.tcx.hir_node_by_def_id(parent_def_id) {
                     hir::Node::Item(item) => call_finder.visit_item(item),
                     hir::Node::TraitItem(item) => call_finder.visit_trait_item(item),
@@ -2620,7 +2529,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
 
                 let expected_display_type = self
-                    .resolve_vars_if_possible(formal_and_expected_inputs[idx.into()].1)
+                    .resolve_vars_if_possible(formal_and_expected_inputs[idx].1)
                     .sort_string(self.tcx);
                 let label = if idxs_matched == params_with_generics.len() - 1 {
                     format!(
@@ -2650,7 +2559,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         is_method: bool,
     ) -> Option<(IndexVec<ExpectedIdx, (Option<GenericIdx>, FnParam<'_>)>, &hir::Generics<'_>)>
     {
-        let (sig, generics, body_id, param_names) = match self.tcx.hir().get_if_local(def_id)? {
+        let (sig, generics, body_id, params) = match self.tcx.hir_get_if_local(def_id)? {
             hir::Node::TraitItem(&hir::TraitItem {
                 generics,
                 kind: hir::TraitItemKind::Fn(sig, trait_fn),
@@ -2692,10 +2601,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 None
             }
         });
-        match (body_id, param_names) {
+        match (body_id, params) {
             (Some(_), Some(_)) | (None, None) => unreachable!(),
             (Some(body), None) => {
-                let params = self.tcx.hir().body(body).params;
+                let params = self.tcx.hir_body(body).params;
                 let params =
                     params.get(is_method as usize..params.len() - sig.decl.c_variadic as usize)?;
                 debug_assert_eq!(params.len(), fn_inputs.len());
@@ -2709,7 +2618,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     params.get(is_method as usize..params.len() - sig.decl.c_variadic as usize)?;
                 debug_assert_eq!(params.len(), fn_inputs.len());
                 Some((
-                    fn_inputs.zip(params.iter().map(|param| FnParam::Name(param))).collect(),
+                    fn_inputs.zip(params.iter().map(|&ident| FnParam::Ident(ident))).collect(),
                     generics,
                 ))
             }
@@ -2725,8 +2634,8 @@ struct FindClosureArg<'tcx> {
 impl<'tcx> Visitor<'tcx> for FindClosureArg<'tcx> {
     type NestedFilter = rustc_middle::hir::nested_filter::All;
 
-    fn nested_visit_map(&mut self) -> Self::Map {
-        self.tcx.hir()
+    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
+        self.tcx
     }
 
     fn visit_expr(&mut self, ex: &'tcx hir::Expr<'tcx>) {
@@ -2740,23 +2649,20 @@ impl<'tcx> Visitor<'tcx> for FindClosureArg<'tcx> {
 #[derive(Clone, Copy)]
 enum FnParam<'hir> {
     Param(&'hir hir::Param<'hir>),
-    Name(&'hir Ident),
+    Ident(Option<Ident>),
 }
+
 impl FnParam<'_> {
     fn span(&self) -> Span {
         match self {
-            Self::Param(x) => x.span,
-            Self::Name(x) => x.span,
-        }
-    }
-
-    fn name(&self) -> Option<Symbol> {
-        match self {
-            Self::Param(x) if let hir::PatKind::Binding(_, _, ident, _) = x.pat.kind => {
-                Some(ident.name)
+            Self::Param(param) => param.span,
+            Self::Ident(ident) => {
+                if let Some(ident) = ident {
+                    ident.span
+                } else {
+                    DUMMY_SP
+                }
             }
-            Self::Name(x) if x.name != kw::Empty => Some(x.name),
-            _ => None,
         }
     }
 
@@ -2764,8 +2670,24 @@ impl FnParam<'_> {
         struct D<'a>(FnParam<'a>, usize);
         impl fmt::Display for D<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                if let Some(name) = self.0.name() {
-                    write!(f, "`{name}`")
+                // A "unique" param name is one that (a) exists, and (b) is guaranteed to be unique
+                // among the parameters, i.e. `_` does not count.
+                let unique_name = match self.0 {
+                    FnParam::Param(param)
+                        if let hir::PatKind::Binding(_, _, ident, _) = param.pat.kind =>
+                    {
+                        Some(ident.name)
+                    }
+                    FnParam::Ident(ident)
+                        if let Some(ident) = ident
+                            && ident.name != kw::Underscore =>
+                    {
+                        Some(ident.name)
+                    }
+                    _ => None,
+                };
+                if let Some(unique_name) = unique_name {
+                    write!(f, "`{unique_name}`")
                 } else {
                     write!(f, "parameter #{}", self.1 + 1)
                 }

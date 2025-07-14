@@ -1,19 +1,17 @@
 use rustc_data_structures::fx::{FxIndexMap, FxIndexSet};
 use rustc_hir as hir;
 use rustc_infer::traits::util;
-use rustc_middle::ty::fold::shift_vars;
 use rustc_middle::ty::{
     self, GenericArgs, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitableExt,
+    Upcast, shift_vars,
 };
 use rustc_middle::{bug, span_bug};
 use rustc_span::Span;
 use rustc_span::def_id::{DefId, LocalDefId};
-use rustc_type_ir::Upcast;
 use tracing::{debug, instrument};
 
 use super::ItemCtxt;
 use super::predicates_of::assert_only_contains_predicates_from;
-use crate::bounds::Bounds;
 use crate::hir_ty_lowering::{HirTyLowerer, PredicateFilter};
 
 /// For associated types we include both bounds written on the type
@@ -38,15 +36,15 @@ fn associated_type_bounds<'tcx>(
         );
 
         let icx = ItemCtxt::new(tcx, assoc_item_def_id);
-        let mut bounds = Bounds::default();
+        let mut bounds = Vec::new();
         icx.lowerer().lower_bounds(item_ty, hir_bounds, &mut bounds, ty::List::empty(), filter);
-        // Associated types are implicitly sized unless a `?Sized` bound is found
+        // Implicit bounds are added to associated types unless a `?Trait` bound is found
         match filter {
             PredicateFilter::All
             | PredicateFilter::SelfOnly
             | PredicateFilter::SelfTraitThatDefines(_)
             | PredicateFilter::SelfAndAssociatedTypeBounds => {
-                icx.lowerer().add_sized_bound(&mut bounds, item_ty, hir_bounds, None, span);
+                icx.lowerer().add_default_traits(&mut bounds, item_ty, hir_bounds, None, span);
             }
             // `ConstIfConst` is only interested in `~const` bounds.
             PredicateFilter::ConstIfConst | PredicateFilter::SelfConstIfConst => {}
@@ -68,7 +66,7 @@ fn associated_type_bounds<'tcx>(
                 )
             });
 
-        let all_bounds = tcx.arena.alloc_from_iter(bounds.clauses().chain(bounds_from_parent));
+        let all_bounds = tcx.arena.alloc_from_iter(bounds.into_iter().chain(bounds_from_parent));
         debug!(
             "associated_type_bounds({}) = {:?}",
             tcx.def_path_str(assoc_item_def_id.to_def_id()),
@@ -327,23 +325,22 @@ fn opaque_type_bounds<'tcx>(
 ) -> &'tcx [(ty::Clause<'tcx>, Span)] {
     ty::print::with_reduced_queries!({
         let icx = ItemCtxt::new(tcx, opaque_def_id);
-        let mut bounds = Bounds::default();
+        let mut bounds = Vec::new();
         icx.lowerer().lower_bounds(item_ty, hir_bounds, &mut bounds, ty::List::empty(), filter);
-        // Opaque types are implicitly sized unless a `?Sized` bound is found
+        // Implicit bounds are added to opaque types unless a `?Trait` bound is found
         match filter {
             PredicateFilter::All
             | PredicateFilter::SelfOnly
             | PredicateFilter::SelfTraitThatDefines(_)
             | PredicateFilter::SelfAndAssociatedTypeBounds => {
-                // Associated types are implicitly sized unless a `?Sized` bound is found
-                icx.lowerer().add_sized_bound(&mut bounds, item_ty, hir_bounds, None, span);
+                icx.lowerer().add_default_traits(&mut bounds, item_ty, hir_bounds, None, span);
             }
             //`ConstIfConst` is only interested in `~const` bounds.
             PredicateFilter::ConstIfConst | PredicateFilter::SelfConstIfConst => {}
         }
         debug!(?bounds);
 
-        tcx.arena.alloc_from_iter(bounds.clauses())
+        tcx.arena.alloc_slice(&bounds)
     })
 }
 

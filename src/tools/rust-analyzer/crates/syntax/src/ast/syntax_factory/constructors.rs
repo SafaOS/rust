@@ -1,11 +1,11 @@
 //! Wrappers over [`make`] constructors
 use crate::{
+    AstNode, NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
-        self, make, HasArgList, HasGenericArgs, HasGenericParams, HasName, HasTypeBounds,
-        HasVisibility,
+        self, HasArgList, HasGenericArgs, HasGenericParams, HasLoopBody, HasName, HasTypeBounds,
+        HasVisibility, RangeItem, make,
     },
     syntax_editor::SyntaxMappingBuilder,
-    AstNode, NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken,
 };
 
 use super::SyntaxFactory;
@@ -107,6 +107,20 @@ impl SyntaxFactory {
         ast
     }
 
+    pub fn use_(&self, visibility: Option<ast::Visibility>, use_tree: ast::UseTree) -> ast::Use {
+        make::use_(visibility, use_tree).clone_for_update()
+    }
+
+    pub fn use_tree(
+        &self,
+        path: ast::Path,
+        use_tree_list: Option<ast::UseTreeList>,
+        alias: Option<ast::Rename>,
+        add_star: bool,
+    ) -> ast::UseTree {
+        make::use_tree(path, use_tree_list, alias, add_star).clone_for_update()
+    }
+
     pub fn path_unqualified(&self, segment: ast::PathSegment) -> ast::Path {
         let ast = make::path_unqualified(segment.clone()).clone_for_update();
 
@@ -129,7 +143,7 @@ impl SyntaxFactory {
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
-            builder.map_children(input.into_iter(), ast.segments().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.segments().map(|it| it.syntax().clone()));
             builder.finish(&mut mapping);
         }
 
@@ -156,6 +170,32 @@ impl SyntaxFactory {
         make::literal_pat(text).clone_for_update()
     }
 
+    pub fn slice_pat(&self, pats: impl IntoIterator<Item = ast::Pat>) -> ast::SlicePat {
+        let (pats, input) = iterator_input(pats);
+        let ast = make::slice_pat(pats).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_children(input, ast.pats().map(|it| it.syntax().clone()));
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn tuple_pat(&self, pats: impl IntoIterator<Item = ast::Pat>) -> ast::TuplePat {
+        let (pats, input) = iterator_input(pats);
+        let ast = make::tuple_pat(pats).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_children(input, ast.fields().map(|it| it.syntax().clone()));
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
     pub fn tuple_struct_pat(
         &self,
         path: ast::Path,
@@ -167,7 +207,171 @@ impl SyntaxFactory {
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
             builder.map_node(path.syntax().clone(), ast.path().unwrap().syntax().clone());
-            builder.map_children(input.into_iter(), ast.fields().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.fields().map(|it| it.syntax().clone()));
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn record_pat_with_fields(
+        &self,
+        path: ast::Path,
+        fields: ast::RecordPatFieldList,
+    ) -> ast::RecordPat {
+        let ast = make::record_pat_with_fields(path.clone(), fields.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(path.syntax().clone(), ast.path().unwrap().syntax().clone());
+            builder.map_node(
+                fields.syntax().clone(),
+                ast.record_pat_field_list().unwrap().syntax().clone(),
+            );
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn record_pat_field_list(
+        &self,
+        fields: impl IntoIterator<Item = ast::RecordPatField>,
+        rest_pat: Option<ast::RestPat>,
+    ) -> ast::RecordPatFieldList {
+        let (fields, input) = iterator_input(fields);
+        let ast = make::record_pat_field_list(fields, rest_pat.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_children(input, ast.fields().map(|it| it.syntax().clone()));
+            if let Some(rest_pat) = rest_pat {
+                builder
+                    .map_node(rest_pat.syntax().clone(), ast.rest_pat().unwrap().syntax().clone());
+            }
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn record_pat_field(&self, name_ref: ast::NameRef, pat: ast::Pat) -> ast::RecordPatField {
+        let ast = make::record_pat_field(name_ref.clone(), pat.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(name_ref.syntax().clone(), ast.name_ref().unwrap().syntax().clone());
+            builder.map_node(pat.syntax().clone(), ast.pat().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn record_pat_field_shorthand(&self, pat: ast::Pat) -> ast::RecordPatField {
+        let ast = make::record_pat_field_shorthand(pat.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(pat.syntax().clone(), ast.pat().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn path_pat(&self, path: ast::Path) -> ast::Pat {
+        let ast = make::path_pat(path.clone()).clone_for_update();
+
+        match &ast {
+            ast::Pat::PathPat(ast) => {
+                if let Some(mut mapping) = self.mappings() {
+                    let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+                    builder.map_node(path.syntax().clone(), ast.path().unwrap().syntax().clone());
+                    builder.finish(&mut mapping)
+                }
+            }
+            ast::Pat::IdentPat(ast) => {
+                if let Some(mut mapping) = self.mappings() {
+                    let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+                    builder.map_node(path.syntax().clone(), ast.name().unwrap().syntax().clone());
+                    builder.finish(&mut mapping)
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        ast
+    }
+
+    pub fn rest_pat(&self) -> ast::RestPat {
+        make::rest_pat().clone_for_update()
+    }
+
+    pub fn or_pat(
+        &self,
+        pats: impl IntoIterator<Item = ast::Pat>,
+        leading_pipe: bool,
+    ) -> ast::OrPat {
+        let (pats, input) = iterator_input(pats);
+        let ast = make::or_pat(pats, leading_pipe).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_children(input, ast.pats().map(|it| it.syntax().clone()));
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn box_pat(&self, pat: ast::Pat) -> ast::BoxPat {
+        let ast = make::box_pat(pat.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(pat.syntax().clone(), ast.pat().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn paren_pat(&self, pat: ast::Pat) -> ast::ParenPat {
+        let ast = make::paren_pat(pat.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(pat.syntax().clone(), ast.pat().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn range_pat(&self, start: Option<ast::Pat>, end: Option<ast::Pat>) -> ast::RangePat {
+        let ast = make::range_pat(start.clone(), end.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            if let Some(start) = start {
+                builder.map_node(start.syntax().clone(), ast.start().unwrap().syntax().clone());
+            }
+            if let Some(end) = end {
+                builder.map_node(end.syntax().clone(), ast.end().unwrap().syntax().clone());
+            }
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn ref_pat(&self, pat: ast::Pat) -> ast::RefPat {
+        let ast = make::ref_pat(pat.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(pat.syntax().clone(), ast.pat().unwrap().syntax().clone());
             builder.finish(&mut mapping);
         }
 
@@ -199,10 +403,7 @@ impl SyntaxFactory {
                 builder.map_node(last_stmt, ast_tail.syntax().clone());
             }
 
-            builder.map_children(
-                input.into_iter(),
-                stmt_list.statements().map(|it| it.syntax().clone()),
-            );
+            builder.map_children(input, stmt_list.statements().map(|it| it.syntax().clone()));
 
             builder.finish(&mut mapping);
         }
@@ -214,13 +415,25 @@ impl SyntaxFactory {
         make::expr_empty_block().clone_for_update()
     }
 
+    pub fn expr_paren(&self, expr: ast::Expr) -> ast::ParenExpr {
+        let ast = make::expr_paren(expr.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(expr.syntax().clone(), ast.expr().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
     pub fn expr_tuple(&self, fields: impl IntoIterator<Item = ast::Expr>) -> ast::TupleExpr {
         let (fields, input) = iterator_input(fields);
         let ast = make::expr_tuple(fields).clone_for_update();
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
-            builder.map_children(input.into_iter(), ast.fields().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.fields().map(|it| it.syntax().clone()));
             builder.finish(&mut mapping);
         }
 
@@ -275,16 +488,31 @@ impl SyntaxFactory {
     }
 
     pub fn expr_call(&self, expr: ast::Expr, arg_list: ast::ArgList) -> ast::CallExpr {
-        // FIXME: `make::expr_call`` should return a `CallExpr`, not just an `Expr`
-        let ast::Expr::CallExpr(ast) =
-            make::expr_call(expr.clone(), arg_list.clone()).clone_for_update()
-        else {
-            unreachable!()
-        };
+        let ast = make::expr_call(expr.clone(), arg_list.clone()).clone_for_update();
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
             builder.map_node(expr.syntax().clone(), ast.expr().unwrap().syntax().clone());
+            builder.map_node(arg_list.syntax().clone(), ast.arg_list().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn expr_method_call(
+        &self,
+        receiver: ast::Expr,
+        method: ast::NameRef,
+        arg_list: ast::ArgList,
+    ) -> ast::MethodCallExpr {
+        let ast = make::expr_method_call(receiver.clone(), method.clone(), arg_list.clone())
+            .clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(receiver.syntax().clone(), ast.receiver().unwrap().syntax().clone());
+            builder.map_node(method.syntax().clone(), ast.name_ref().unwrap().syntax().clone());
             builder.map_node(arg_list.syntax().clone(), ast.arg_list().unwrap().syntax().clone());
             builder.finish(&mut mapping);
         }
@@ -298,7 +526,7 @@ impl SyntaxFactory {
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax.clone());
-            builder.map_children(input.into_iter(), ast.args().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.args().map(|it| it.syntax().clone()));
             builder.finish(&mut mapping);
         }
 
@@ -318,6 +546,27 @@ impl SyntaxFactory {
         }
 
         ast.into()
+    }
+
+    pub fn expr_closure(
+        &self,
+        pats: impl IntoIterator<Item = ast::Param>,
+        expr: ast::Expr,
+    ) -> ast::ClosureExpr {
+        let (args, input) = iterator_input(pats);
+        let ast = make::expr_closure(args, expr.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax.clone());
+            builder.map_children(
+                input,
+                ast.param_list().unwrap().params().map(|param| param.syntax().clone()),
+            );
+            builder.map_node(expr.syntax().clone(), ast.body().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
     }
 
     pub fn expr_return(&self, expr: Option<ast::Expr>) -> ast::ReturnExpr {
@@ -365,6 +614,19 @@ impl SyntaxFactory {
         ast
     }
 
+    pub fn expr_while_loop(&self, condition: ast::Expr, body: ast::BlockExpr) -> ast::WhileExpr {
+        let ast = make::expr_while_loop(condition.clone(), body.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(condition.syntax().clone(), ast.condition().unwrap().syntax().clone());
+            builder.map_node(body.syntax().clone(), ast.loop_body().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
     pub fn expr_let(&self, pattern: ast::Pat, expr: ast::Expr) -> ast::LetExpr {
         let ast = make::expr_let(pattern.clone(), expr.clone()).clone_for_update();
 
@@ -400,6 +662,21 @@ impl SyntaxFactory {
                 match_arm_list.syntax().clone(),
                 ast.match_arm_list().unwrap().syntax().clone(),
             );
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn expr_macro(&self, path: ast::Path, tt: ast::TokenTree) -> ast::MacroExpr {
+        let ast = make::expr_macro(path.clone(), tt.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let macro_call = ast.macro_call().unwrap();
+            let mut builder = SyntaxMappingBuilder::new(macro_call.syntax().clone());
+            builder.map_node(path.syntax().clone(), macro_call.path().unwrap().syntax().clone());
+            builder
+                .map_node(tt.syntax().clone(), macro_call.token_tree().unwrap().syntax().clone());
             builder.finish(&mut mapping);
         }
 
@@ -448,7 +725,7 @@ impl SyntaxFactory {
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
-            builder.map_children(input.into_iter(), ast.arms().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.arms().map(|it| it.syntax().clone()));
             builder.finish(&mut mapping);
         }
 
@@ -474,6 +751,38 @@ impl SyntaxFactory {
                 builder
                     .map_node(input.syntax().clone(), ast.initializer().unwrap().syntax().clone());
             }
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn let_else_stmt(
+        &self,
+        pattern: ast::Pat,
+        ty: Option<ast::Type>,
+        initializer: ast::Expr,
+        diverging: ast::BlockExpr,
+    ) -> ast::LetStmt {
+        let ast = make::let_else_stmt(
+            pattern.clone(),
+            ty.clone(),
+            initializer.clone(),
+            diverging.clone(),
+        )
+        .clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(pattern.syntax().clone(), ast.pat().unwrap().syntax().clone());
+            if let Some(input) = ty {
+                builder.map_node(input.syntax().clone(), ast.ty().unwrap().syntax().clone());
+            }
+            builder.map_node(
+                initializer.syntax().clone(),
+                ast.initializer().unwrap().syntax().clone(),
+            );
+            builder.map_node(diverging.syntax().clone(), ast.let_else().unwrap().syntax().clone());
             builder.finish(&mut mapping);
         }
 
@@ -571,6 +880,19 @@ impl SyntaxFactory {
         ast
     }
 
+    pub fn param(&self, pat: ast::Pat, ty: ast::Type) -> ast::Param {
+        let ast = make::param(pat.clone(), ty.clone());
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+            builder.map_node(pat.syntax().clone(), ast.pat().unwrap().syntax().clone());
+            builder.map_node(ty.syntax().clone(), ast.ty().unwrap().syntax().clone());
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
     pub fn generic_arg_list(
         &self,
         generic_args: impl IntoIterator<Item = ast::GenericArg>,
@@ -585,10 +907,28 @@ impl SyntaxFactory {
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
-            builder.map_children(
-                input.into_iter(),
-                ast.generic_args().map(|arg| arg.syntax().clone()),
-            );
+            builder.map_children(input, ast.generic_args().map(|arg| arg.syntax().clone()));
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
+    pub fn record_expr_field(
+        &self,
+        name: ast::NameRef,
+        expr: Option<ast::Expr>,
+    ) -> ast::RecordExprField {
+        let ast = make::record_expr_field(name.clone(), expr.clone()).clone_for_update();
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+
+            builder.map_node(name.syntax().clone(), ast.name_ref().unwrap().syntax().clone());
+            if let Some(expr) = expr {
+                builder.map_node(expr.syntax().clone(), ast.expr().unwrap().syntax().clone());
+            }
+
             builder.finish(&mut mapping);
         }
 
@@ -605,7 +945,7 @@ impl SyntaxFactory {
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
 
-            builder.map_children(input.into_iter(), ast.fields().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.fields().map(|it| it.syntax().clone()));
 
             builder.finish(&mut mapping);
         }
@@ -650,7 +990,7 @@ impl SyntaxFactory {
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
 
-            builder.map_children(input.into_iter(), ast.fields().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.fields().map(|it| it.syntax().clone()));
 
             builder.finish(&mut mapping);
         }
@@ -745,7 +1085,7 @@ impl SyntaxFactory {
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
 
-            builder.map_children(input.into_iter(), ast.variants().map(|it| it.syntax().clone()));
+            builder.map_children(input, ast.variants().map(|it| it.syntax().clone()));
 
             builder.finish(&mut mapping);
         }
@@ -797,6 +1137,69 @@ impl SyntaxFactory {
         ast
     }
 
+    pub fn fn_(
+        &self,
+        visibility: Option<ast::Visibility>,
+        fn_name: ast::Name,
+        type_params: Option<ast::GenericParamList>,
+        where_clause: Option<ast::WhereClause>,
+        params: ast::ParamList,
+        body: ast::BlockExpr,
+        ret_type: Option<ast::RetType>,
+        is_async: bool,
+        is_const: bool,
+        is_unsafe: bool,
+        is_gen: bool,
+    ) -> ast::Fn {
+        let ast = make::fn_(
+            visibility.clone(),
+            fn_name.clone(),
+            type_params.clone(),
+            where_clause.clone(),
+            params.clone(),
+            body.clone(),
+            ret_type.clone(),
+            is_async,
+            is_const,
+            is_unsafe,
+            is_gen,
+        );
+
+        if let Some(mut mapping) = self.mappings() {
+            let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
+
+            if let Some(visibility) = visibility {
+                builder.map_node(
+                    visibility.syntax().clone(),
+                    ast.visibility().unwrap().syntax().clone(),
+                );
+            }
+            builder.map_node(fn_name.syntax().clone(), ast.name().unwrap().syntax().clone());
+            if let Some(type_params) = type_params {
+                builder.map_node(
+                    type_params.syntax().clone(),
+                    ast.generic_param_list().unwrap().syntax().clone(),
+                );
+            }
+            if let Some(where_clause) = where_clause {
+                builder.map_node(
+                    where_clause.syntax().clone(),
+                    ast.where_clause().unwrap().syntax().clone(),
+                );
+            }
+            builder.map_node(params.syntax().clone(), ast.param_list().unwrap().syntax().clone());
+            builder.map_node(body.syntax().clone(), ast.body().unwrap().syntax().clone());
+            if let Some(ret_type) = ret_type {
+                builder
+                    .map_node(ret_type.syntax().clone(), ast.ret_type().unwrap().syntax().clone());
+            }
+
+            builder.finish(&mut mapping);
+        }
+
+        ast
+    }
+
     pub fn token_tree(
         &self,
         delimiter: SyntaxKind,
@@ -809,10 +1212,7 @@ impl SyntaxFactory {
 
         if let Some(mut mapping) = self.mappings() {
             let mut builder = SyntaxMappingBuilder::new(ast.syntax().clone());
-            builder.map_children(
-                input.into_iter(),
-                ast.token_trees_and_tokens().filter_map(only_nodes),
-            );
+            builder.map_children(input, ast.token_trees_and_tokens().filter_map(only_nodes));
             builder.finish(&mut mapping);
         }
 

@@ -11,10 +11,10 @@ mod snippet;
 mod tests;
 
 use ide_db::{
+    FilePosition, FxHashSet, RootDatabase,
     imports::insert_use::{self, ImportScope},
     syntax_helpers::tree_diff::diff,
     text_edit::TextEdit,
-    FilePosition, FxHashSet, RootDatabase,
 };
 use syntax::ast::make;
 
@@ -143,7 +143,7 @@ impl CompletionFieldsToResolve {
 /// already present, it should give all possible variants for the identifier at
 /// the caret. In other words, for
 ///
-/// ```no_run
+/// ```ignore
 /// fn f() {
 ///     let foo = 92;
 ///     let _ = bar$0
@@ -275,7 +275,9 @@ pub fn resolve_completion_edits(
     let _p = tracing::info_span!("resolve_completion_edits").entered();
     let sema = hir::Semantics::new(db);
 
-    let original_file = sema.parse(sema.attach_first_edition(file_id)?);
+    let editioned_file_id = sema.attach_first_edition(file_id)?;
+
+    let original_file = sema.parse(editioned_file_id);
     let original_token =
         syntax::AstNode::syntax(&original_file).token_at_offset(offset).left_biased()?;
     let position_for_import = &original_token.parent()?;

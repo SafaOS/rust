@@ -3,7 +3,7 @@ use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::macros::matching_root_macro_call;
 use clippy_utils::msrvs::{self, Msrv};
 use clippy_utils::sugg::Sugg;
-use clippy_utils::{higher, is_in_const_context, path_to_local, peel_ref_operators};
+use clippy_utils::{higher, is_in_const_context, path_to_local, peel_ref_operators, sym};
 use rustc_ast::LitKind::{Byte, Char};
 use rustc_ast::ast::RangeLimits;
 use rustc_errors::Applicability;
@@ -11,7 +11,7 @@ use rustc_hir::{Expr, ExprKind, Lit, Node, Param, PatExpr, PatExprKind, PatKind,
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{self, Ty};
 use rustc_session::impl_lint_pass;
-use rustc_span::{Span, sym};
+use rustc_span::Span;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -64,9 +64,7 @@ pub struct ManualIsAsciiCheck {
 
 impl ManualIsAsciiCheck {
     pub fn new(conf: &'static Conf) -> Self {
-        Self {
-            msrv: conf.msrv.clone(),
-        }
+        Self { msrv: conf.msrv }
     }
 }
 
@@ -91,11 +89,11 @@ enum CharRange {
 
 impl<'tcx> LateLintPass<'tcx> for ManualIsAsciiCheck {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
-        if !self.msrv.meets(msrvs::IS_ASCII_DIGIT) {
+        if !self.msrv.meets(cx, msrvs::IS_ASCII_DIGIT) {
             return;
         }
 
-        if is_in_const_context(cx) && !self.msrv.meets(msrvs::IS_ASCII_DIGIT_CONST) {
+        if is_in_const_context(cx) && !self.msrv.meets(cx, msrvs::IS_ASCII_DIGIT_CONST) {
             return;
         }
 
@@ -105,7 +103,7 @@ impl<'tcx> LateLintPass<'tcx> for ManualIsAsciiCheck {
                 check_is_ascii(cx, macro_call.span, recv, &range, None);
             }
         } else if let ExprKind::MethodCall(path, receiver, [arg], ..) = expr.kind
-            && path.ident.name.as_str() == "contains"
+            && path.ident.name == sym::contains
             && let Some(higher::Range {
                 start: Some(start),
                 end: Some(end),
@@ -119,8 +117,6 @@ impl<'tcx> LateLintPass<'tcx> for ManualIsAsciiCheck {
             check_is_ascii(cx, expr.span, arg, &range, ty_sugg);
         }
     }
-
-    extract_msrv_attr!(LateContext);
 }
 
 fn get_ty_sugg<'tcx>(cx: &LateContext<'tcx>, arg: &Expr<'_>) -> Option<(Span, Ty<'tcx>)> {
@@ -152,7 +148,7 @@ fn check_is_ascii(
     };
     let default_snip = "..";
     let mut app = Applicability::MachineApplicable;
-    let recv = Sugg::hir_with_context(cx, recv, span.ctxt(), default_snip, &mut app).maybe_par();
+    let recv = Sugg::hir_with_context(cx, recv, span.ctxt(), default_snip, &mut app).maybe_paren();
     let mut suggestion = vec![(span, format!("{recv}.{sugg}()"))];
     if let Some((ty_span, ty)) = ty_sugg {
         suggestion.push((ty_span, format!("{recv}: {ty}")));

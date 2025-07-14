@@ -14,6 +14,7 @@ use stable_mir::target::MachineSize as Size;
 use stable_mir::ty::{Align, IndexedVal, VariantIdx};
 
 use crate::rustc_smir::{Stable, Tables};
+use crate::stable_mir;
 
 impl<'tcx> Stable<'tcx> for rustc_abi::VariantIdx {
     type T = VariantIdx;
@@ -202,12 +203,11 @@ impl<'tcx> Stable<'tcx> for rustc_abi::BackendRepr {
 
     fn stable(&self, tables: &mut Tables<'_>) -> Self::T {
         match *self {
-            rustc_abi::BackendRepr::Uninhabited => ValueAbi::Uninhabited,
             rustc_abi::BackendRepr::Scalar(scalar) => ValueAbi::Scalar(scalar.stable(tables)),
             rustc_abi::BackendRepr::ScalarPair(first, second) => {
                 ValueAbi::ScalarPair(first.stable(tables), second.stable(tables))
             }
-            rustc_abi::BackendRepr::Vector { element, count } => {
+            rustc_abi::BackendRepr::SimdVector { element, count } => {
                 ValueAbi::Vector { element: element.stable(tables), count }
             }
             rustc_abi::BackendRepr::Memory { sized } => ValueAbi::Aggregate { sized },

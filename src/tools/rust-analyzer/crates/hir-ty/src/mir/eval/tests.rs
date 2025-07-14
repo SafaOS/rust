@@ -1,21 +1,24 @@
 use hir_def::db::DefDatabase;
-use span::{Edition, EditionedFileId};
+use hir_expand::EditionedFileId;
+use span::Edition;
 use syntax::{TextRange, TextSize};
 use test_fixture::WithFixture;
 
-use crate::{db::HirDatabase, test_db::TestDB, Interner, Substitution};
+use crate::display::DisplayTarget;
+use crate::{Interner, Substitution, db::HirDatabase, mir::MirLowerError, test_db::TestDB};
 
-use super::{interpret_mir, MirEvalError};
+use super::{MirEvalError, interpret_mir};
 
 fn eval_main(db: &TestDB, file_id: EditionedFileId) -> Result<(String, String), MirEvalError> {
-    let module_id = db.module_for_file(file_id);
+    let module_id = db.module_for_file(file_id.file_id(db));
     let def_map = module_id.def_map(db);
     let scope = &def_map[module_id.local_id].scope;
     let func_id = scope
         .declarations()
         .find_map(|x| match x {
             hir_def::ModuleDefId::FunctionId(x) => {
-                if db.function_data(x).name.display(db, Edition::CURRENT).to_string() == "main" {
+                if db.function_signature(x).name.display(db, Edition::CURRENT).to_string() == "main"
+                {
                     Some(x)
                 } else {
                     None
@@ -67,7 +70,9 @@ fn check_pass_and_stdio(
             let span_formatter = |file, range: TextRange| {
                 format!("{:?} {:?}..{:?}", file, line_index(range.start()), line_index(range.end()))
             };
-            e.pretty_print(&mut err, &db, span_formatter, Edition::CURRENT).unwrap();
+            let krate = db.module_for_file(file_id.file_id(&db)).krate();
+            e.pretty_print(&mut err, &db, span_formatter, DisplayTarget::from_crate(&db, krate))
+                .unwrap();
             panic!("Error in interpreting: {err}");
         }
         Ok((stdout, stderr)) => {
@@ -82,6 +87,16 @@ fn check_panic(#[rust_analyzer::rust_fixture] ra_fixture: &str, expected_panic: 
     let file_id = *file_ids.last().unwrap();
     let e = eval_main(&db, file_id).unwrap_err();
     assert_eq!(e.is_panic().unwrap_or_else(|| panic!("unexpected error: {e:?}")), expected_panic);
+}
+
+fn check_error_with(
+    #[rust_analyzer::rust_fixture] ra_fixture: &str,
+    expect_err: impl FnOnce(MirEvalError) -> bool,
+) {
+    let (db, file_ids) = TestDB::with_many_files(ra_fixture);
+    let file_id = *file_ids.last().unwrap();
+    let e = eval_main(&db, file_id).unwrap_err();
+    assert!(expect_err(e));
 }
 
 #[test]
@@ -910,5 +925,62 @@ fn main() {
         "#,
         "false",
         "",
+    );
+}
+
+#[test]
+fn regression_19021() {
+    check_pass(
+        r#"
+//- minicore: deref
+use core::ops::Deref;
+
+#[lang = "owned_box"]
+struct Box<T>(T);
+
+impl<T> Deref for Box<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+struct Foo;
+
+fn main() {
+    let x = Box(Foo);
+    let y = &Foo;
+
+    || match x {
+        ref x => x,
+        _ => y,
+    };
+}
+"#,
+    );
+}
+
+#[test]
+fn regression_19177() {
+    check_error_with(
+        r#"
+//- minicore: copy
+trait Foo {}
+trait Bar {}
+trait Baz {}
+trait Qux {
+    type Assoc;
+}
+
+fn main<'a, T: Foo + Bar + Baz>(
+    x: &T,
+    y: (),
+    z: &'a dyn Qux<Assoc = T>,
+    w: impl Foo + Bar,
+) {
+}
+"#,
+        |e| matches!(e, MirEvalError::MirLowerError(_, MirLowerError::GenericArgNotProvided(..))),
     );
 }

@@ -7,8 +7,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::thread::panicking;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use std::{env, fs, io, str};
+use std::{env, fs, io, panic, str};
 
 use build_helper::util::fail;
 use object::read::archive::ArchiveFile;
@@ -22,6 +23,23 @@ pub use crate::utils::shared_helpers::{dylib_path, dylib_path_var};
 #[cfg(test)]
 mod tests;
 
+/// A wrapper around `std::panic::Location` used to track the location of panics
+/// triggered by `t` macro usage.
+pub struct PanicTracker<'a>(pub &'a panic::Location<'a>);
+
+impl Drop for PanicTracker<'_> {
+    fn drop(&mut self) {
+        if panicking() {
+            eprintln!(
+                "Panic was initiated from {}:{}:{}",
+                self.0.file(),
+                self.0.line(),
+                self.0.column()
+            );
+        }
+    }
+}
+
 /// A helper macro to `unwrap` a result except also print out details like:
 ///
 /// * The file/line of the panic
@@ -32,24 +50,43 @@ mod tests;
 /// using a `Result` with `try!`, but this may change one day...
 #[macro_export]
 macro_rules! t {
-    ($e:expr) => {
+    ($e:expr) => {{
+        let _panic_guard = $crate::PanicTracker(std::panic::Location::caller());
         match $e {
             Ok(e) => e,
             Err(e) => panic!("{} failed with {}", stringify!($e), e),
         }
-    };
+    }};
     // it can show extra info in the second parameter
-    ($e:expr, $extra:expr) => {
+    ($e:expr, $extra:expr) => {{
+        let _panic_guard = $crate::PanicTracker(std::panic::Location::caller());
         match $e {
             Ok(e) => e,
             Err(e) => panic!("{} failed with {} ({:?})", stringify!($e), e, $extra),
         }
-    };
+    }};
 }
 
 pub use t;
 pub fn exe(name: &str, target: TargetSelection) -> String {
     crate::utils::shared_helpers::exe(name, &target.triple)
+}
+
+/// Returns the path to the split debug info for the specified file if it exists.
+pub fn split_debuginfo(name: impl Into<PathBuf>) -> Option<PathBuf> {
+    // FIXME: only msvc is currently supported
+
+    let path = name.into();
+    let pdb = path.with_extension("pdb");
+    if pdb.exists() {
+        return Some(pdb);
+    }
+
+    // pdbs get named with '-' replaced by '_'
+    let file_name = pdb.file_name()?.to_str()?.replace("-", "_");
+
+    let pdb: PathBuf = [path.parent()?, Path::new(&file_name)].into_iter().collect();
+    pdb.exists().then_some(pdb)
 }
 
 /// Returns `true` if the file name given looks like a dynamic library.
@@ -286,7 +323,7 @@ pub fn output(cmd: &mut Command) -> String {
 /// to finish and then return its output. This allows the spawned process
 /// to do work without immediately blocking bootstrap.
 #[track_caller]
-pub fn start_process(cmd: &mut Command) -> impl FnOnce() -> String {
+pub fn start_process(cmd: &mut Command) -> impl FnOnce() -> String + use<> {
     let child = match cmd.stderr(Stdio::inherit()).stdout(Stdio::piped()).spawn() {
         Ok(child) => child,
         Err(e) => fail(&format!("failed to execute command: {cmd:?}\nERROR: {e}")),
@@ -415,9 +452,7 @@ pub fn dir_is_empty(dir: &Path) -> bool {
 /// the "y" part from the string.
 pub fn extract_beta_rev(version: &str) -> Option<String> {
     let parts = version.splitn(2, "-beta.").collect::<Vec<_>>();
-    let count = parts.get(1).and_then(|s| s.find(' ').map(|p| s[..p].to_string()));
-
-    count
+    parts.get(1).and_then(|s| s.find(' ').map(|p| s[..p].to_string()))
 }
 
 pub enum LldThreads {
@@ -451,12 +486,12 @@ pub fn linker_flags(
     if !builder.is_lld_direct_linker(target) && builder.config.lld_mode.is_used() {
         match builder.config.lld_mode {
             LldMode::External => {
-                args.push("-Clinker-flavor=gnu-lld-cc".to_string());
+                args.push("-Zlinker-features=+lld".to_string());
                 // FIXME(kobzol): remove this flag once MCP510 gets stabilized
                 args.push("-Zunstable-options".to_string());
             }
             LldMode::SelfContained => {
-                args.push("-Clinker-flavor=gnu-lld-cc".to_string());
+                args.push("-Zlinker-features=+lld".to_string());
                 args.push("-Clink-self-contained=+linker".to_string());
                 // FIXME(kobzol): remove this flag once MCP510 gets stabilized
                 args.push("-Zunstable-options".to_string());

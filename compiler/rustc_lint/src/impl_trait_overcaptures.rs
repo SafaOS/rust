@@ -15,7 +15,8 @@ use rustc_middle::ty::relate::{
     Relate, RelateResult, TypeRelation, structurally_relate_consts, structurally_relate_tys,
 };
 use rustc_middle::ty::{
-    self, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
+    self, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitableExt,
+    TypeVisitor,
 };
 use rustc_middle::{bug, span_bug};
 use rustc_session::lint::FutureIncompatibilityReason;
@@ -41,7 +42,7 @@ declare_lint! {
     ///
     /// ### Example
     ///
-    /// ```rust,compile_fail
+    /// ```rust,compile_fail,edition2021
     /// # #![deny(impl_trait_overcaptures)]
     /// # use std::fmt::Display;
     /// let mut x = vec![];
@@ -86,8 +87,7 @@ declare_lint! {
     ///
     /// ### Example
     ///
-    /// ```rust,compile_fail
-    /// # #![feature(lifetime_capture_rules_2024)]
+    /// ```rust,edition2024,compile_fail
     /// # #![deny(impl_trait_redundant_captures)]
     /// fn test<'a>(x: &'a i32) -> impl Sized + use<'a> { x }
     /// ```
@@ -210,7 +210,7 @@ where
     VarFn: FnOnce() -> FxHashMap<DefId, ty::Variance>,
     OutlivesFn: FnOnce() -> OutlivesEnvironment<'tcx>,
 {
-    fn visit_binder<T: TypeVisitable<TyCtxt<'tcx>>>(&mut self, t: &ty::Binder<'tcx, T>) {
+    fn visit_binder<T: TypeFoldable<TyCtxt<'tcx>>>(&mut self, t: &ty::Binder<'tcx, T>) {
         // When we get into a binder, we need to add its own bound vars to the scope.
         let mut added = vec![];
         for arg in t.bound_vars() {
@@ -268,8 +268,7 @@ where
             && parent == self.parent_def_id
         {
             let opaque_span = self.tcx.def_span(opaque_def_id);
-            let new_capture_rules = opaque_span.at_least_rust_2024()
-                || self.tcx.features().lifetime_capture_rules_2024();
+            let new_capture_rules = opaque_span.at_least_rust_2024();
             if !new_capture_rules
                 && !opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..)))
             {
@@ -394,7 +393,7 @@ where
                         }
                         _ => {
                             self.tcx.dcx().span_delayed_bug(
-                                self.tcx.hir().span(arg.hir_id()),
+                                self.tcx.hir_span(arg.hir_id()),
                                 "no valid for captured arg",
                             );
                         }
@@ -463,7 +462,7 @@ fn extract_def_id_from_arg<'tcx>(
     arg: ty::GenericArg<'tcx>,
 ) -> DefId {
     match arg.unpack() {
-        ty::GenericArgKind::Lifetime(re) => match *re {
+        ty::GenericArgKind::Lifetime(re) => match re.kind() {
             ty::ReEarlyParam(ebr) => generics.region_param(ebr, tcx).def_id,
             ty::ReBound(
                 _,
@@ -508,9 +507,9 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for FunctionalVariances<'tcx> {
         self.tcx
     }
 
-    fn relate_with_variance<T: ty::relate::Relate<TyCtxt<'tcx>>>(
+    fn relate_with_variance<T: Relate<TyCtxt<'tcx>>>(
         &mut self,
-        variance: rustc_type_ir::Variance,
+        variance: ty::Variance,
         _: ty::VarianceDiagInfo<TyCtxt<'tcx>>,
         a: T,
         b: T,
@@ -532,7 +531,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for FunctionalVariances<'tcx> {
         a: ty::Region<'tcx>,
         _: ty::Region<'tcx>,
     ) -> RelateResult<'tcx, ty::Region<'tcx>> {
-        let def_id = match *a {
+        let def_id = match a.kind() {
             ty::ReEarlyParam(ebr) => self.generics.region_param(ebr, self.tcx).def_id,
             ty::ReBound(
                 _,

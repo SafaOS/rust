@@ -9,11 +9,11 @@ macro_rules! define_tests {
             let unambig = $kind::$variant::<'_, ()> { $($init)* };
             let unambig_to_ambig = unsafe { std::mem::transmute::<_, $kind<'_, AmbigArg>>(unambig) };
 
-            assert!(matches!(&unambig_to_ambig, $kind::$variant { $($init)* }));
+            assert!(matches!(&unambig_to_ambig, &$kind::$variant { $($init)* }));
 
             let ambig_to_unambig = unsafe { std::mem::transmute::<_, $kind<'_, ()>>(unambig_to_ambig) };
 
-            assert!(matches!(&ambig_to_unambig, $kind::$variant { $($init)* }));
+            assert!(matches!(&ambig_to_unambig, &$kind::$variant { $($init)* }));
         }
     )*};
 }
@@ -50,19 +50,14 @@ fn trait_object_roundtrips() {
 }
 
 fn trait_object_roundtrips_impl(syntax: TraitObjectSyntax) {
-    let unambig = TyKind::TraitObject::<'_, ()>(
-        &[],
-        TaggedRef::new(
-            &const {
-                Lifetime {
-                    hir_id: HirId::INVALID,
-                    ident: Ident::new(sym::name, DUMMY_SP),
-                    res: LifetimeName::Static,
-                }
-            },
-            syntax,
-        ),
-    );
+    let lt = Lifetime {
+        hir_id: HirId::INVALID,
+        ident: Ident::new(sym::name, DUMMY_SP),
+        kind: LifetimeKind::Static,
+        source: LifetimeSource::Other,
+        syntax: LifetimeSyntax::Hidden,
+    };
+    let unambig = TyKind::TraitObject::<'_, ()>(&[], TaggedRef::new(&lt, syntax));
     let unambig_to_ambig = unsafe { std::mem::transmute::<_, TyKind<'_, AmbigArg>>(unambig) };
 
     match unambig_to_ambig {

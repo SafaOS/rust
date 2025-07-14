@@ -45,14 +45,14 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use rustc_ast_ir::visit::VisitorResult;
-use rustc_ast_ir::{try_visit, walk_visitable_list};
+pub use rustc_ast_ir::visit::VisitorResult;
+pub use rustc_ast_ir::{try_visit, walk_visitable_list};
 use rustc_index::{Idx, IndexVec};
 use smallvec::SmallVec;
 use thin_vec::ThinVec;
 
 use crate::inherent::*;
-use crate::{self as ty, Interner, TypeFlags};
+use crate::{self as ty, Interner, TypeFlags, TypeFoldable};
 
 /// This trait is implemented for every type that can be visited,
 /// providing the skeleton of the traversal.
@@ -94,7 +94,7 @@ pub trait TypeVisitor<I: Interner>: Sized {
     #[cfg(not(feature = "nightly"))]
     type Result: VisitorResult;
 
-    fn visit_binder<T: TypeVisitable<I>>(&mut self, t: &ty::Binder<I, T>) -> Self::Result {
+    fn visit_binder<T: TypeFoldable<I>>(&mut self, t: &ty::Binder<I, T>) -> Self::Result {
         t.super_visit_with(self)
     }
 
@@ -224,6 +224,13 @@ impl<I: Interner, T: TypeVisitable<I>, Ix: Idx> TypeVisitable<I> for IndexVec<Ix
     }
 }
 
+impl<I: Interner, T: TypeVisitable<I>, S> TypeVisitable<I> for indexmap::IndexSet<T, S> {
+    fn visit_with<V: TypeVisitor<I>>(&self, visitor: &mut V) -> V::Result {
+        walk_visitable_list!(visitor, self.iter());
+        V::Result::output()
+    }
+}
+
 pub trait Flags {
     fn flags(&self) -> TypeFlags;
     fn outer_exclusive_binder(&self) -> ty::DebruijnIndex;
@@ -260,10 +267,6 @@ pub trait TypeVisitableExt<I: Interner>: TypeVisitable<I> {
 
     fn has_opaque_types(&self) -> bool {
         self.has_type_flags(TypeFlags::HAS_TY_OPAQUE)
-    }
-
-    fn has_coroutines(&self) -> bool {
-        self.has_type_flags(TypeFlags::HAS_TY_COROUTINE)
     }
 
     fn references_error(&self) -> bool {
@@ -398,7 +401,7 @@ impl std::fmt::Debug for HasTypeFlagsVisitor {
 impl<I: Interner> TypeVisitor<I> for HasTypeFlagsVisitor {
     type Result = ControlFlow<FoundFlags>;
 
-    fn visit_binder<T: TypeVisitable<I>>(&mut self, t: &ty::Binder<I, T>) -> Self::Result {
+    fn visit_binder<T: TypeFoldable<I>>(&mut self, t: &ty::Binder<I, T>) -> Self::Result {
         // If we're looking for the HAS_BINDER_VARS flag, check if the
         // binder has vars. This won't be present in the binder's bound
         // value, so we need to check here too.
@@ -507,7 +510,7 @@ struct HasEscapingVarsVisitor {
 impl<I: Interner> TypeVisitor<I> for HasEscapingVarsVisitor {
     type Result = ControlFlow<FoundEscapingVars>;
 
-    fn visit_binder<T: TypeVisitable<I>>(&mut self, t: &ty::Binder<I, T>) -> Self::Result {
+    fn visit_binder<T: TypeFoldable<I>>(&mut self, t: &ty::Binder<I, T>) -> Self::Result {
         self.outer_index.shift_in(1);
         let result = t.super_visit_with(self);
         self.outer_index.shift_out(1);

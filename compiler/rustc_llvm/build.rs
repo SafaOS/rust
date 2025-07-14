@@ -51,9 +51,13 @@ fn detect_llvm_link() -> (&'static str, &'static str) {
 fn restore_library_path() {
     let key = tracked_env_var_os("REAL_LIBRARY_PATH_VAR").expect("REAL_LIBRARY_PATH_VAR");
     if let Some(env) = tracked_env_var_os("REAL_LIBRARY_PATH") {
-        env::set_var(&key, env);
+        unsafe {
+            env::set_var(&key, env);
+        }
     } else {
-        env::remove_var(&key);
+        unsafe {
+            env::remove_var(&key);
+        }
     }
 }
 
@@ -237,7 +241,7 @@ fn main() {
         println!("cargo:rustc-link-lib=kstat");
     }
 
-    if (target.starts_with("arm") && !target.contains("freebsd"))
+    if (target.starts_with("arm") && !target.contains("freebsd")) && !target.contains("ohos")
         || target.starts_with("mips-")
         || target.starts_with("mipsel-")
         || target.starts_with("powerpc-")
@@ -367,6 +371,7 @@ fn main() {
         || target.contains("freebsd")
         || target.contains("windows-gnullvm")
         || target.contains("aix")
+        || target.contains("ohos")
     {
         "c++"
     } else if target.contains("netbsd") && llvm_static_stdcpp.is_some() {

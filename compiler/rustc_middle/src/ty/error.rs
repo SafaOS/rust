@@ -205,7 +205,7 @@ impl<'tcx> Ty<'tcx> {
             ty::Placeholder(..) => "higher-ranked type".into(),
             ty::Bound(..) => "bound type variable".into(),
             ty::Alias(ty::Projection | ty::Inherent, _) => "associated type".into(),
-            ty::Alias(ty::Weak, _) => "type alias".into(),
+            ty::Alias(ty::Free, _) => "type alias".into(),
             ty::Param(_) => "type parameter".into(),
             ty::Alias(ty::Opaque, ..) => "opaque type".into(),
         }
@@ -213,10 +213,9 @@ impl<'tcx> Ty<'tcx> {
 }
 
 impl<'tcx> TyCtxt<'tcx> {
-    pub fn string_with_limit<'a, T>(self, p: T, length_limit: usize) -> String
+    pub fn string_with_limit<T>(self, p: T, length_limit: usize) -> String
     where
-        T: Print<'tcx, FmtPrinter<'a, 'tcx>> + Lift<TyCtxt<'tcx>> + Copy,
-        <T as Lift<TyCtxt<'tcx>>>::Lifted: Print<'tcx, FmtPrinter<'a, 'tcx>>,
+        T: Copy + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<'b, FmtPrinter<'a, 'b>>>,
     {
         let mut type_limit = 50;
         let regular = FmtPrinter::print_string(self, hir::def::Namespace::TypeNS, |cx| {
@@ -253,10 +252,9 @@ impl<'tcx> TyCtxt<'tcx> {
     /// `tcx.short_string(ty, diag.long_ty_path())`. The diagnostic itself is the one that keeps
     /// the existence of a "long type" anywhere in the diagnostic, so the note telling the user
     /// where we wrote the file to is only printed once.
-    pub fn short_string<'a, T>(self, p: T, path: &mut Option<PathBuf>) -> String
+    pub fn short_string<T>(self, p: T, path: &mut Option<PathBuf>) -> String
     where
-        T: Print<'tcx, FmtPrinter<'a, 'tcx>> + Lift<TyCtxt<'tcx>> + Copy + Hash,
-        <T as Lift<TyCtxt<'tcx>>>::Lifted: Print<'tcx, FmtPrinter<'a, 'tcx>>,
+        T: Copy + Hash + for<'a, 'b> Lift<TyCtxt<'b>, Lifted: Print<'b, FmtPrinter<'a, 'b>>>,
     {
         let regular = FmtPrinter::print_string(self, hir::def::Namespace::TypeNS, |cx| {
             self.lift(p).expect("could not lift for printing").print(cx)
@@ -281,7 +279,7 @@ impl<'tcx> TyCtxt<'tcx> {
         p.hash(&mut s);
         let hash = s.finish();
         *path = Some(path.take().unwrap_or_else(|| {
-            self.output_filenames(()).temp_path_ext(&format!("long-type-{hash}.txt"), None)
+            self.output_filenames(()).temp_path_for_diagnostic(&format!("long-type-{hash}.txt"))
         }));
         let Ok(mut file) =
             File::options().create(true).read(true).append(true).open(&path.as_ref().unwrap())

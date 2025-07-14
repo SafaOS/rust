@@ -142,7 +142,20 @@ pub trait SpanRangeExt: SpanRange {
         map_range(cx.sess().source_map(), self.into_range(), f)
     }
 
-    /// Extends the range to include all preceding whitespace characters.
+    #[allow(rustdoc::invalid_rust_codeblocks, reason = "The codeblock is intentionally broken")]
+    /// Extends the range to include all preceding whitespace characters, unless there
+    /// are non-whitespace characters left on the same line after `self`.
+    ///
+    /// This extra condition prevents a problem when removing the '}' in:
+    /// ```ignore
+    ///   ( // There was an opening bracket after the parenthesis, which has been removed
+    ///     // This is a comment
+    ///    })
+    /// ```
+    /// Removing the whitespaces, including the linefeed, before the '}', would put the
+    /// closing parenthesis at the end of the `// This is a comment` line, which would
+    /// make it part of the comment as well. In this case, it is best to keep the span
+    /// on the '}' alone.
     fn with_leading_whitespace(self, cx: &impl HasSession) -> Range<BytePos> {
         with_leading_whitespace(cx.sess().source_map(), self.into_range())
     }
@@ -263,10 +276,15 @@ fn map_range(
 }
 
 fn with_leading_whitespace(sm: &SourceMap, sp: Range<BytePos>) -> Range<BytePos> {
-    map_range(sm, sp.clone(), |src, range| {
-        Some(src.get(..range.start)?.trim_end().len()..range.end)
+    map_range(sm, sp, |src, range| {
+        let non_blank_after = src.len() - src.get(range.end..)?.trim_start().len();
+        if src.get(range.end..non_blank_after)?.contains(['\r', '\n']) {
+            Some(src.get(..range.start)?.trim_end().len()..range.end)
+        } else {
+            Some(range)
+        }
     })
-    .unwrap_or(sp)
+    .unwrap()
 }
 
 fn trim_start(sm: &SourceMap, sp: Range<BytePos>) -> Range<BytePos> {
@@ -294,7 +312,7 @@ impl SourceFileRange {
     }
 }
 
-/// Like `snippet_block`, but add braces if the expr is not an `ExprKind::Block`.
+/// Like `snippet_block`, but add braces if the expr is not an `ExprKind::Block` with no label.
 pub fn expr_block(
     sess: &impl HasSession,
     expr: &Expr<'_>,
@@ -305,10 +323,10 @@ pub fn expr_block(
 ) -> String {
     let (code, from_macro) = snippet_block_with_context(sess, expr.span, outer, default, indent_relative_to, app);
     if !from_macro
-        && let ExprKind::Block(block, _) = expr.kind
+        && let ExprKind::Block(block, None) = expr.kind
         && block.rules != BlockCheckMode::UnsafeBlock(UnsafeSource::UserProvided)
     {
-        format!("{code}")
+        code
     } else {
         // FIXME: add extra indent for the unsafe blocks:
         //     original code:   unsafe { ... }
@@ -384,10 +402,10 @@ pub fn snippet_indent(sess: &impl HasSession, span: Span) -> Option<String> {
 // For some reason these attributes don't have any expansion info on them, so
 // we have to check it this way until there is a better way.
 pub fn is_present_in_source(sess: &impl HasSession, span: Span) -> bool {
-    if let Some(snippet) = snippet_opt(sess, span) {
-        if snippet.is_empty() {
-            return false;
-        }
+    if let Some(snippet) = snippet_opt(sess, span)
+        && snippet.is_empty()
+    {
+        return false;
     }
     true
 }
@@ -408,11 +426,11 @@ pub fn position_before_rarrow(s: &str) -> Option<usize> {
         let mut rpos = rpos;
         let chars: Vec<char> = s.chars().collect();
         while rpos > 1 {
-            if let Some(c) = chars.get(rpos - 1) {
-                if c.is_whitespace() {
-                    rpos -= 1;
-                    continue;
-                }
+            if let Some(c) = chars.get(rpos - 1)
+                && c.is_whitespace()
+            {
+                rpos -= 1;
+                continue;
             }
             break;
         }
@@ -421,11 +439,10 @@ pub fn position_before_rarrow(s: &str) -> Option<usize> {
 }
 
 /// Reindent a multiline string with possibility of ignoring the first line.
-#[expect(clippy::needless_pass_by_value)]
-pub fn reindent_multiline(s: Cow<'_, str>, ignore_first: bool, indent: Option<usize>) -> Cow<'_, str> {
-    let s_space = reindent_multiline_inner(&s, ignore_first, indent, ' ');
+pub fn reindent_multiline(s: &str, ignore_first: bool, indent: Option<usize>) -> String {
+    let s_space = reindent_multiline_inner(s, ignore_first, indent, ' ');
     let s_tab = reindent_multiline_inner(&s_space, ignore_first, indent, '\t');
-    reindent_multiline_inner(&s_tab, ignore_first, indent, ' ').into()
+    reindent_multiline_inner(&s_tab, ignore_first, indent, ' ')
 }
 
 fn reindent_multiline_inner(s: &str, ignore_first: bool, indent: Option<usize>, ch: char) -> String {
@@ -553,42 +570,37 @@ pub fn snippet_opt(sess: &impl HasSession, span: Span) -> Option<String> {
 ///     } // aligned with `if`
 /// ```
 /// Note that the first line of the snippet always has 0 indentation.
-pub fn snippet_block<'a>(
-    sess: &impl HasSession,
-    span: Span,
-    default: &'a str,
-    indent_relative_to: Option<Span>,
-) -> Cow<'a, str> {
+pub fn snippet_block(sess: &impl HasSession, span: Span, default: &str, indent_relative_to: Option<Span>) -> String {
     let snip = snippet(sess, span, default);
     let indent = indent_relative_to.and_then(|s| indent_of(sess, s));
-    reindent_multiline(snip, true, indent)
+    reindent_multiline(&snip, true, indent)
 }
 
 /// Same as `snippet_block`, but adapts the applicability level by the rules of
 /// `snippet_with_applicability`.
-pub fn snippet_block_with_applicability<'a>(
+pub fn snippet_block_with_applicability(
     sess: &impl HasSession,
     span: Span,
-    default: &'a str,
+    default: &str,
     indent_relative_to: Option<Span>,
     applicability: &mut Applicability,
-) -> Cow<'a, str> {
+) -> String {
     let snip = snippet_with_applicability(sess, span, default, applicability);
     let indent = indent_relative_to.and_then(|s| indent_of(sess, s));
-    reindent_multiline(snip, true, indent)
+    reindent_multiline(&snip, true, indent)
 }
 
-pub fn snippet_block_with_context<'a>(
+pub fn snippet_block_with_context(
     sess: &impl HasSession,
     span: Span,
     outer: SyntaxContext,
-    default: &'a str,
+    default: &str,
     indent_relative_to: Option<Span>,
     app: &mut Applicability,
-) -> (Cow<'a, str>, bool) {
+) -> (String, bool) {
     let (snip, from_macro) = snippet_with_context(sess, span, outer, default, app);
     let indent = indent_relative_to.and_then(|s| indent_of(sess, s));
-    (reindent_multiline(snip, true, indent), from_macro)
+    (reindent_multiline(&snip, true, indent), from_macro)
 }
 
 /// Same as `snippet_with_applicability`, but first walks the span up to the given context.
@@ -749,11 +761,11 @@ mod test {
 
     #[test]
     fn test_reindent_multiline_single_line() {
-        assert_eq!("", reindent_multiline("".into(), false, None));
-        assert_eq!("...", reindent_multiline("...".into(), false, None));
-        assert_eq!("...", reindent_multiline("    ...".into(), false, None));
-        assert_eq!("...", reindent_multiline("\t...".into(), false, None));
-        assert_eq!("...", reindent_multiline("\t\t...".into(), false, None));
+        assert_eq!("", reindent_multiline("", false, None));
+        assert_eq!("...", reindent_multiline("...", false, None));
+        assert_eq!("...", reindent_multiline("    ...", false, None));
+        assert_eq!("...", reindent_multiline("\t...", false, None));
+        assert_eq!("...", reindent_multiline("\t\t...", false, None));
     }
 
     #[test]
@@ -768,7 +780,7 @@ mod test {
             y
         } else {
             z
-        }".into(), false, None));
+        }", false, None));
         assert_eq!("\
     if x {
     \ty
@@ -778,7 +790,7 @@ mod test {
         \ty
         } else {
         \tz
-        }".into(), false, None));
+        }", false, None));
     }
 
     #[test]
@@ -795,7 +807,7 @@ mod test {
 
         } else {
             z
-        }".into(), false, None));
+        }", false, None));
     }
 
     #[test]
@@ -811,6 +823,6 @@ mod test {
         y
     } else {
         z
-    }".into(), true, Some(8)));
+    }", true, Some(8)));
     }
 }

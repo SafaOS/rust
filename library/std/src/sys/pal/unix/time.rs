@@ -92,7 +92,7 @@ impl Timespec {
         if tv_nsec >= 0 && tv_nsec < NSEC_PER_SEC as i64 {
             Ok(unsafe { Self::new_unchecked(tv_sec, tv_nsec) })
         } else {
-            Err(io::const_error!(io::ErrorKind::InvalidData, "Invalid timestamp"))
+            Err(io::const_error!(io::ErrorKind::InvalidData, "invalid timestamp"))
         }
     }
 
@@ -112,7 +112,12 @@ impl Timespec {
 
             // __clock_gettime64 was added to 32-bit arches in glibc 2.34,
             // and it handles both vDSO calls and ENOSYS fallbacks itself.
-            weak!(fn __clock_gettime64(libc::clockid_t, *mut __timespec64) -> libc::c_int);
+            weak!(
+                fn __clock_gettime64(
+                    clockid: libc::clockid_t,
+                    tp: *mut __timespec64,
+                ) -> libc::c_int;
+            );
 
             if let Some(clock_gettime64) = __clock_gettime64.get() {
                 let mut t = MaybeUninit::uninit();

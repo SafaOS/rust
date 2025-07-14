@@ -1,4 +1,5 @@
 //@ revisions:opt3 noopt
+//@ only-x86_64
 //@[opt3] compile-flags: -Copt-level=3
 //@[noopt] compile-flags: -Cno-prepopulate-passes
 
@@ -14,14 +15,14 @@ use core::{mem, ptr};
 
 #[repr(simd, packed)]
 #[derive(Copy, Clone)]
-pub struct Simd<T, const N: usize>([T; N]);
+pub struct PackedSimd<T, const N: usize>([T; N]);
 
 #[repr(simd)]
 #[derive(Copy, Clone)]
 pub struct FullSimd<T, const N: usize>([T; N]);
 
 // non-powers-of-two have padding and need to be expanded to full vectors
-fn load<T, const N: usize>(v: Simd<T, N>) -> FullSimd<T, N> {
+fn load<T, const N: usize>(v: PackedSimd<T, N>) -> FullSimd<T, N> {
     unsafe {
         let mut tmp = mem::MaybeUninit::<FullSimd<T, N>>::uninit();
         ptr::copy_nonoverlapping(&v as *const _, tmp.as_mut_ptr().cast(), 1);
@@ -33,7 +34,7 @@ fn load<T, const N: usize>(v: Simd<T, N>) -> FullSimd<T, N> {
 // CHECK-SAME: ptr{{[a-z_ ]*}} sret([[RET_TYPE:[^)]+]]) [[RET_ALIGN:align (8|16)]]{{[^%]*}} [[RET_VREG:%[_0-9]*]]
 // CHECK-SAME: ptr{{[a-z_ ]*}} align 4
 #[no_mangle]
-pub fn square_packed_full(x: Simd<f32, 3>) -> FullSimd<f32, 3> {
+pub fn square_packed_full(x: PackedSimd<f32, 3>) -> FullSimd<f32, 3> {
     // CHECK-NEXT: start
     // noopt: alloca [[RET_TYPE]], [[RET_ALIGN]]
     // CHECK: load <3 x float>
@@ -48,7 +49,7 @@ pub fn square_packed_full(x: Simd<f32, 3>) -> FullSimd<f32, 3> {
 // CHECK-SAME: ptr{{[a-z_ ]*}} sret([[RET_TYPE:[^)]+]]) [[RET_ALIGN:align 4]]{{[^%]*}} [[RET_VREG:%[_0-9]*]]
 // CHECK-SAME: ptr{{[a-z_ ]*}} align 4
 #[no_mangle]
-pub fn square_packed(x: Simd<f32, 3>) -> Simd<f32, 3> {
+pub fn square_packed(x: PackedSimd<f32, 3>) -> PackedSimd<f32, 3> {
     // CHECK-NEXT: start
     // CHECK-NEXT: load <3 x float>
     // noopt-NEXT: load <3 x float>

@@ -1,9 +1,9 @@
-use expect_test::{expect, Expect};
-use ide_db::{base_db::SourceDatabase, FileRange};
+use expect_test::{Expect, expect};
+use ide_db::{FileRange, base_db::SourceDatabase};
 use syntax::TextRange;
 
 use crate::{
-    fixture, HoverConfig, HoverDocFormat, MemoryLayoutHoverConfig, MemoryLayoutHoverRenderKind,
+    HoverConfig, HoverDocFormat, MemoryLayoutHoverConfig, MemoryLayoutHoverRenderKind, fixture,
 };
 
 const HOVER_BASE_CONFIG: HoverConfig = HoverConfig {
@@ -21,6 +21,7 @@ const HOVER_BASE_CONFIG: HoverConfig = HoverConfig {
     max_fields_count: Some(5),
     max_enum_variants_count: Some(5),
     max_subst_ty_len: super::SubstTyLen::Unlimited,
+    show_drop_glue: true,
 };
 
 fn check_hover_no_result(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
@@ -46,7 +47,7 @@ fn check(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expect) {
         .unwrap();
 
     let content = analysis.db.file_text(position.file_id);
-    let hovered_element = &content[hover.range];
+    let hovered_element = &content.text(&analysis.db)[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
     expect.assert_eq(&actual)
@@ -71,7 +72,7 @@ fn check_hover_fields_limit(
         .unwrap()
         .unwrap();
 
-    let content = analysis.db.file_text(position.file_id);
+    let content = analysis.db.file_text(position.file_id).text(&analysis.db);
     let hovered_element = &content[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
@@ -97,7 +98,7 @@ fn check_hover_enum_variants_limit(
         .unwrap()
         .unwrap();
 
-    let content = analysis.db.file_text(position.file_id);
+    let content = analysis.db.file_text(position.file_id).text(&analysis.db);
     let hovered_element = &content[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
@@ -123,7 +124,7 @@ fn check_assoc_count(
         .unwrap()
         .unwrap();
 
-    let content = analysis.db.file_text(position.file_id);
+    let content = analysis.db.file_text(position.file_id).text(&analysis.db);
     let hovered_element = &content[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
@@ -140,7 +141,7 @@ fn check_hover_no_links(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect:
         .unwrap()
         .unwrap();
 
-    let content = analysis.db.file_text(position.file_id);
+    let content = analysis.db.file_text(position.file_id).text(&analysis.db);
     let hovered_element = &content[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
@@ -157,7 +158,7 @@ fn check_hover_no_memory_layout(#[rust_analyzer::rust_fixture] ra_fixture: &str,
         .unwrap()
         .unwrap();
 
-    let content = analysis.db.file_text(position.file_id);
+    let content = analysis.db.file_text(position.file_id).text(&analysis.db);
     let hovered_element = &content[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
@@ -178,7 +179,7 @@ fn check_hover_no_markdown(#[rust_analyzer::rust_fixture] ra_fixture: &str, expe
         .unwrap()
         .unwrap();
 
-    let content = analysis.db.file_text(position.file_id);
+    let content = analysis.db.file_text(position.file_id).text(&analysis.db);
     let hovered_element = &content[hover.range];
 
     let actual = format!("*{hovered_element}*\n{}\n", hover.info.markup);
@@ -566,7 +567,7 @@ fn main() {
 
             ---
 
-            size = 8, align = 4
+            size = 8, align = 4, no Drop
         "#]],
     );
 }
@@ -811,7 +812,7 @@ struct Foo { fiel$0d_a: u8, field_b: i32, field_c: i16 }
 
             ---
 
-            size = 1, align = 1, offset = 6
+            size = 1, align = 1, offset = 6, no Drop
         "#]],
     );
 }
@@ -862,7 +863,7 @@ fn main() {
 
             ---
 
-            size = 4, align = 4, offset = 0
+            size = 4, align = 4, offset = 0, no Drop
         "#]],
     );
 }
@@ -932,7 +933,7 @@ struct Foo$0(pub u32) where u32: Copy;
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -958,7 +959,7 @@ struct Foo$0 { field: u32 }
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
     check(
@@ -983,7 +984,7 @@ struct Foo$0 where u32: Copy { field: u32 }
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -1012,7 +1013,7 @@ fn hover_record_struct_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4
+            size = 12 (0xC), align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1035,7 +1036,7 @@ fn hover_record_struct_limit() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1061,7 +1062,7 @@ fn hover_record_struct_limit() {
 
             ---
 
-            size = 16 (0x10), align = 4
+            size = 16 (0x10), align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1082,7 +1083,7 @@ fn hover_record_struct_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4
+            size = 12 (0xC), align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1103,7 +1104,7 @@ fn hover_record_struct_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4
+            size = 12 (0xC), align = 4, no Drop
         "#]],
     );
 
@@ -1126,7 +1127,7 @@ fn hover_record_struct_limit() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -1151,7 +1152,7 @@ fn hover_record_variant_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4
+            size = 12 (0xC), align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1172,7 +1173,7 @@ fn hover_record_variant_limit() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1193,7 +1194,7 @@ fn hover_record_variant_limit() {
 
             ---
 
-            size = 16 (0x10), align = 4
+            size = 16 (0x10), align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1214,7 +1215,7 @@ fn hover_record_variant_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4
+            size = 12 (0xC), align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1235,7 +1236,7 @@ fn hover_record_variant_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4
+            size = 12 (0xC), align = 4, no Drop
         "#]],
     );
 }
@@ -1261,7 +1262,7 @@ fn hover_enum_limit() {
 
             ---
 
-            size = 1, align = 1, niches = 254
+            size = 1, align = 1, niches = 254, no Drop
         "#]],
     );
     check_hover_enum_variants_limit(
@@ -1283,7 +1284,7 @@ fn hover_enum_limit() {
 
             ---
 
-            size = 1, align = 1, niches = 254
+            size = 1, align = 1, niches = 254, no Drop
         "#]],
     );
     check_hover_enum_variants_limit(
@@ -1302,7 +1303,7 @@ fn hover_enum_limit() {
 
             ---
 
-            size = 1, align = 1, niches = 254
+            size = 1, align = 1, niches = 254, no Drop
         "#]],
     );
     check_hover_enum_variants_limit(
@@ -1321,7 +1322,7 @@ fn hover_enum_limit() {
 
             ---
 
-            size = 1, align = 1, niches = 254
+            size = 1, align = 1, niches = 254, no Drop
         "#]],
     );
     check_hover_enum_variants_limit(
@@ -1358,7 +1359,7 @@ fn hover_enum_limit() {
 
             ---
 
-            size = 12 (0xC), align = 4, niches = a lot
+            size = 12 (0xC), align = 4, niches = a lot, no Drop
         "#]],
     );
 }
@@ -1384,7 +1385,7 @@ fn hover_union_limit() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1406,7 +1407,7 @@ fn hover_union_limit() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1425,7 +1426,7 @@ fn hover_union_limit() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
     check_hover_fields_limit(
@@ -1444,7 +1445,7 @@ fn hover_union_limit() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -1470,7 +1471,7 @@ struct Foo$0 where u32: Copy;
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -1493,6 +1494,10 @@ type Fo$0o: Trait = S where T: Trait;
             where
                 T: Trait,
             ```
+
+            ---
+
+            no Drop
         "#]],
     );
 }
@@ -1641,7 +1646,7 @@ fn main() {
 
             ---
 
-            size = 8, align = 4
+            size = 8, align = 4, no Drop
         "#]],
     );
     check_hover_range(
@@ -1696,7 +1701,7 @@ fn main() { let b$0ar = Some(12); }
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -1721,6 +1726,10 @@ enum Option<T> {
             ```rust
             None
             ```
+
+            ---
+
+            no Drop
 
             ---
 
@@ -1783,7 +1792,7 @@ fn hover_for_local_variable_pat() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     )
 }
@@ -1815,7 +1824,7 @@ fn hover_for_param_edge() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     )
 }
@@ -1838,6 +1847,10 @@ fn hover_for_param_with_multiple_traits() {
             ```rust
             _x: impl Deref<Target = u8> + DerefMut<Target = u8>
             ```
+
+            ---
+
+            type param may need Drop
         "#]],
     )
 }
@@ -1863,7 +1876,7 @@ fn main() { let foo_$0test = Thing::new(); }
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     )
 }
@@ -1948,6 +1961,10 @@ impl Thing {
                 x: u32,
             }
             ```
+
+            ---
+
+            size = 4, align = 4
         "#]],
     );
     check_hover_fields_limit(
@@ -1968,6 +1985,10 @@ impl Thing {
             ```rust
             struct Thing
             ```
+
+            ---
+
+            size = 4, align = 4
         "#]],
     );
     check(
@@ -1989,6 +2010,10 @@ impl Thing {
                 x: u32,
             }
             ```
+
+            ---
+
+            size = 4, align = 4
         "#]],
     );
     check(
@@ -2010,6 +2035,10 @@ impl Thing {
                 A,
             }
             ```
+
+            ---
+
+            size = 0, align = 1
         "#]],
     );
     check(
@@ -2031,6 +2060,10 @@ impl Thing {
                 A,
             }
             ```
+
+            ---
+
+            size = 0, align = 1
         "#]],
     );
     check(
@@ -2049,6 +2082,10 @@ impl usize {
             ```rust
             usize
             ```
+
+            ---
+
+            size = 8, align = 8
         "#]],
     );
     check(
@@ -2067,6 +2104,32 @@ impl fn() -> usize {
             ```rust
             fn() -> usize
             ```
+
+            ---
+
+            size = 8, align = 8, niches = 1
+        "#]],
+    );
+    check(
+        r#"
+pub struct Foo
+where
+    Self$0:;
+"#,
+        expect![[r#"
+            *Self*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            pub struct Foo
+            ```
+
+            ---
+
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -2612,7 +2675,7 @@ fn test_hover_function_pointer_show_identifiers() {
 
             ---
 
-            size = 8, align = 8, niches = 1
+            size = 8, align = 8, niches = 1, no Drop
         "#]],
     );
 }
@@ -2634,7 +2697,7 @@ fn test_hover_function_pointer_no_identifier() {
 
             ---
 
-            size = 8, align = 8, niches = 1
+            size = 8, align = 8, niches = 1, no Drop
         "#]],
     );
 }
@@ -2877,7 +2940,7 @@ pub struct B$0ar
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
 
             ---
 
@@ -2908,7 +2971,7 @@ pub struct B$0ar
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
 
             ---
 
@@ -3001,7 +3064,7 @@ fn test_hover_layout_of_variant() {
 
             ---
 
-            size = 4, align = 2
+            size = 4, align = 2, no Drop
         "#]],
     );
 }
@@ -3023,6 +3086,10 @@ fn test_hover_layout_of_variant_generic() {
             ```rust
             None
             ```
+
+            ---
+
+            no Drop
         "#]],
     );
 }
@@ -3047,7 +3114,7 @@ struct S$0<T>(core::marker::PhantomData<T>);
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -3075,7 +3142,7 @@ fn test_hover_layout_of_enum() {
 
             ---
 
-            size = 16 (0x10), align = 8, niches = 254
+            size = 16 (0x10), align = 8, niches = 254, no Drop
         "#]],
     );
 }
@@ -3094,6 +3161,10 @@ fn test_hover_no_memory_layout() {
             ```rust
             field_a: u8
             ```
+
+            ---
+
+            no Drop
         "#]],
     );
 
@@ -4401,7 +4472,7 @@ fn main() {
 
             ---
 
-            size = 8, align = 8, niches = 1
+            size = 8, align = 8, niches = 1, no Drop
 
             ---
 
@@ -4415,7 +4486,7 @@ fn main() {
 
             ---
 
-            size = 4, align = 4, offset = 0
+            size = 4, align = 4, offset = 0, no Drop
         "#]],
     );
 }
@@ -4435,12 +4506,12 @@ struct S$0T<const C: usize = 1, T = Foo>(T);
             ```
 
             ```rust
-            struct ST<const C: usize = 1, T = Foo>(T)
+            struct ST<const C: usize = {const}, T = Foo>(T)
             ```
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, type param may need Drop
         "#]],
     );
 }
@@ -4465,7 +4536,7 @@ struct S$0T<const C: usize = {40 + 2}, T = Foo>(T);
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, type param may need Drop
         "#]],
     );
 }
@@ -4486,12 +4557,12 @@ struct S$0T<const C: usize = VAL, T = Foo>(T);
             ```
 
             ```rust
-            struct ST<const C: usize = VAL, T = Foo>(T)
+            struct ST<const C: usize = {const}, T = Foo>(T)
             ```
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, type param may need Drop
         "#]],
     );
 }
@@ -4515,7 +4586,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -4539,7 +4610,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -4558,12 +4629,12 @@ fn main() {
             *value*
 
             ```rust
-            let value: Const<-1>
+            let value: Const<_>
             ```
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -4587,7 +4658,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -4611,7 +4682,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -4634,7 +4705,7 @@ impl Foo {
 
             ---
 
-            size = 8, align = 8, niches = 1
+            size = 8, align = 8, niches = 1, no Drop
         "#]],
     );
 }
@@ -4658,7 +4729,7 @@ impl Foo {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -5143,12 +5214,12 @@ type Fo$0o2 = Foo<2>;
             ```
 
             ```rust
-            type Foo2 = Foo<2>
+            type Foo2 = Foo<<expr>>
             ```
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -5198,7 +5269,7 @@ enum E {
 
             ---
 
-            size = 1, align = 1
+            size = 1, align = 1, no Drop
 
             ---
 
@@ -5227,7 +5298,7 @@ enum E {
 
             ---
 
-            size = 1, align = 1
+            size = 1, align = 1, no Drop
 
             ---
 
@@ -5257,7 +5328,7 @@ enum E {
 
             ---
 
-            size = 1, align = 1
+            size = 1, align = 1, no Drop
 
             ---
 
@@ -5287,7 +5358,7 @@ enum E {
 
             ---
 
-            size = 1, align = 1
+            size = 1, align = 1, no Drop
 
             ---
 
@@ -5952,7 +6023,7 @@ const FOO$0: &[i32; 5] = &[12; 5];
             ```
 
             ```rust
-            const FOO: &[i32; 5] = &[12, 12, 12, 12, 12]
+            const FOO: &[i32; {const}] = &[12, 12, 12, 12, 12]
             ```
         "#]],
     );
@@ -6218,7 +6289,7 @@ fn main() {
 
             ---
 
-            size = 32 (0x20), align = 4
+            size = 32 (0x20), align = 4, no Drop
         "#]],
     );
 }
@@ -6633,109 +6704,14 @@ pub fn foo() {}
 
 #[test]
 fn hover_feature() {
-    check(
-        r#"#![feature(intrinsics$0)]"#,
-        expect![[r#"
-            *intrinsics*
-            ```
-            intrinsics
-            ```
-            ___
-
-            # `intrinsics`
-
-            The tracking issue for this feature is: None.
-
-            Intrinsics are rarely intended to be stable directly, but are usually
-            exported in some sort of stable manner. Prefer using the stable interfaces to
-            the intrinsic directly when you can.
-
-            ------------------------
-
-
-            ## Intrinsics with fallback logic
-
-            Many intrinsics can be written in pure rust, albeit inefficiently or without supporting
-            some features that only exist on some backends. Backends can simply not implement those
-            intrinsics without causing any code miscompilations or failures to compile.
-            All intrinsic fallback bodies are automatically made cross-crate inlineable (like `#[inline]`)
-            by the codegen backend, but not the MIR inliner.
-
-            ```rust
-            #![feature(intrinsics)]
-            #![allow(internal_features)]
-
-            #[rustc_intrinsic]
-            const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize) {}
-            ```
-
-            Since these are just regular functions, it is perfectly ok to create the intrinsic twice:
-
-            ```rust
-            #![feature(intrinsics)]
-            #![allow(internal_features)]
-
-            #[rustc_intrinsic]
-            const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize) {}
-
-            mod foo {
-                #[rustc_intrinsic]
-                const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize) {
-                    panic!("noisy const dealloc")
-                }
-            }
-
-            ```
-
-            The behaviour on backends that override the intrinsic is exactly the same. On other
-            backends, the intrinsic behaviour depends on which implementation is called, just like
-            with any regular function.
-
-            ## Intrinsics lowered to MIR instructions
-
-            Various intrinsics have native MIR operations that they correspond to. Instead of requiring
-            backends to implement both the intrinsic and the MIR operation, the `lower_intrinsics` pass
-            will convert the calls to the MIR operation. Backends do not need to know about these intrinsics
-            at all. These intrinsics only make sense without a body, and can either be declared as a "rust-intrinsic"
-            or as a `#[rustc_intrinsic]`. The body is never used, as calls to the intrinsic do not exist
-            anymore after MIR analyses.
-
-            ## Intrinsics without fallback logic
-
-            These must be implemented by all backends.
-
-            ### `#[rustc_intrinsic]` declarations
-
-            These are written like intrinsics with fallback bodies, but the body is irrelevant.
-            Use `loop {}` for the body or call the intrinsic recursively and add
-            `#[rustc_intrinsic_must_be_overridden]` to the function to ensure that backends don't
-            invoke the body.
-
-            ### Legacy extern ABI based intrinsics
-
-            These are imported as if they were FFI functions, with the special
-            `rust-intrinsic` ABI. For example, if one was in a freestanding
-            context, but wished to be able to `transmute` between types, and
-            perform efficient pointer arithmetic, one would import those functions
-            via a declaration like
-
-            ```rust
-            #![feature(intrinsics)]
-            #![allow(internal_features)]
-            # fn main() {}
-
-            extern "rust-intrinsic" {
-                fn transmute<T, U>(x: T) -> U;
-
-                fn arith_offset<T>(dst: *const T, offset: isize) -> *const T;
-            }
-            ```
-
-            As with any other FFI functions, these are by default always `unsafe` to call.
-            You can add `#[rustc_safe_intrinsic]` to the intrinsic to make it safe to call.
-
-        "#]],
-    )
+    let (analysis, position) = fixture::position(r#"#![feature(intrinsics$0)]"#);
+    analysis
+        .hover(
+            &HoverConfig { links_in_hover: true, ..HOVER_BASE_CONFIG },
+            FileRange { file_id: position.file_id, range: TextRange::empty(position.offset) },
+        )
+        .unwrap()
+        .unwrap();
 }
 
 #[test]
@@ -7109,9 +7085,9 @@ fn foo() {
 }
 "#,
         expect![[r#"
-                ```rust
-                &str
-                ```"#]],
+            ```rust
+            &'static str
+            ```"#]],
     );
 }
 
@@ -7517,7 +7493,7 @@ enum Enum {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -7543,7 +7519,7 @@ enum Enum {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -8213,7 +8189,7 @@ fn test() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -8252,7 +8228,7 @@ format_args!("{aaaaa$0}");
             *aaaaa*
 
             ```rust
-            let aaaaa: &str
+            let aaaaa: &'static str
             ```
         "#]],
     );
@@ -8272,7 +8248,7 @@ format_args!("{$0aaaaa}");
             *aaaaa*
 
             ```rust
-            let aaaaa: &str
+            let aaaaa: &'static str
             ```
         "#]],
     );
@@ -8292,7 +8268,7 @@ format_args!(r"{$0aaaaa}");
             *aaaaa*
 
             ```rust
-            let aaaaa: &str
+            let aaaaa: &'static str
             ```
         "#]],
     );
@@ -8317,7 +8293,7 @@ foo!(r"{$0aaaaa}");
             *aaaaa*
 
             ```rust
-            let aaaaa: &str
+            let aaaaa: &'static str
             ```
         "#]],
     );
@@ -8361,7 +8337,7 @@ fn main() {
         expect![[r#"
             *"🦀\u{1f980}\\\x41"*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
@@ -8377,7 +8353,7 @@ fn main() {
         expect![[r#"
             *r"🦀\u{1f980}\\\x41"*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
@@ -8399,7 +8375,7 @@ fsdghs";
 
             fsdghs"*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
@@ -8419,7 +8395,7 @@ fn main() {
         expect![[r#"
             *c"🦀\u{1f980}\\\x41"*
             ```rust
-            &{unknown}
+            &'static {unknown}
             ```
             ___
 
@@ -8438,7 +8414,7 @@ fn main() {
         expect![[r#"
             *r"`[^`]*`"*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
@@ -8453,7 +8429,7 @@ fn main() {
         expect![[r#"
             *r"`"*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
@@ -8468,7 +8444,7 @@ fn main() {
         expect![[r#"
             *r"    "*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
@@ -8484,12 +8460,12 @@ fn main() {
         expect![[r#"
             *r" Hello World "*
             ```rust
-            &str
+            &'static str
             ```
             ___
 
             value of literal: `  Hello World  `
-"#]],
+        "#]],
     )
 }
 
@@ -8504,7 +8480,7 @@ fn main() {
         expect![[r#"
             *b"\xF0\x9F\xA6\x80\\"*
             ```rust
-            &[u8; 5]
+            &'static [u8; 5]
             ```
             ___
 
@@ -8520,7 +8496,7 @@ fn main() {
         expect![[r#"
             *br"\xF0\x9F\xA6\x80\\"*
             ```rust
-            &[u8; 18]
+            &'static [u8; 18]
             ```
             ___
 
@@ -8858,11 +8834,11 @@ fn main(notable$0: u32) {}
 
             ---
 
-            Implements notable traits: Notable\<Assoc = &str, Assoc2 = char>
+            Implements notable traits: `Notable<Assoc = &str, Assoc2 = char>`
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
         "#]],
     );
 }
@@ -8954,7 +8930,7 @@ extern "C" {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -8983,7 +8959,7 @@ fn main() {
             S
             ```
             ___
-            Implements notable traits: Notable, Future<Output = u32>, Iterator<Item = S>"#]],
+            Implements notable traits: `Future<Output = u32>`, `Iterator<Item = S>`, `Notable`"#]],
     );
 }
 
@@ -9094,13 +9070,13 @@ struct Pedro$0<'a> {
 
             ```rust
             struct Pedro<'a> {
-                hola: &str,
+                hola: &'a str,
             }
             ```
 
             ---
 
-            size = 16 (0x10), align = 8, niches = 1
+            size = 16 (0x10), align = 8, niches = 1, no Drop
         "#]],
     )
 }
@@ -9118,6 +9094,10 @@ fn main(a$0: impl T) {}
             ```rust
             a: impl T + ?Sized
             ```
+
+            ---
+
+            type param may need Drop
         "#]],
     );
 }
@@ -9138,7 +9118,7 @@ fn main(a$0: T) {}
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -9191,7 +9171,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -9525,7 +9505,7 @@ type A$0 = B;
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
 
             ---
 
@@ -9558,7 +9538,7 @@ type A$0 = B;
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
 
             ---
 
@@ -9592,7 +9572,7 @@ type A$0 = B;
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
 
             ---
 
@@ -9624,7 +9604,7 @@ type A$0 = B;
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 
@@ -9748,7 +9728,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 
@@ -9776,7 +9756,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 
@@ -9811,7 +9791,7 @@ fn main() {
 
             ---
 
-            size = 0, align = 1
+            size = 0, align = 1, no Drop
         "#]],
     );
 }
@@ -9957,7 +9937,7 @@ fn baz() {
 
             ---
 
-            `U` = `i32`, `T` = `&str`
+            `U` = `i32`, `T` = `&'static str`
         "#]],
     );
 }
@@ -10050,7 +10030,7 @@ fn bar() {
 
             ---
 
-            `T` = `i8`, `U` = `&str`
+            `T` = `i8`, `U` = `&'static str`
         "#]],
     );
 }
@@ -10130,7 +10110,7 @@ fn bar() {
 
             ---
 
-            size = 4, align = 4
+            size = 4, align = 4, no Drop
 
             ---
 
@@ -10141,6 +10121,10 @@ fn bar() {
             ```rust
             field: T
             ```
+
+            ---
+
+            type param may need Drop
 
             ---
 
@@ -10350,6 +10334,368 @@ macro_rules! str {
                     },
                 ),
             ]
+        "#]],
+    );
+}
+
+#[test]
+fn drop_glue() {
+    check(
+        r#"
+struct NoDrop$0;
+    "#,
+        expect![[r#"
+            *NoDrop*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            struct NoDrop
+            ```
+
+            ---
+
+            size = 0, align = 1, no Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: drop
+struct NeedsDrop$0;
+impl Drop for NeedsDrop {
+    fn drop(&mut self) {}
+}
+    "#,
+        expect![[r#"
+            *NeedsDrop*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            struct NeedsDrop
+            ```
+
+            ---
+
+            size = 0, align = 1, impl Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: manually_drop, drop
+struct NeedsDrop;
+impl Drop for NeedsDrop {
+    fn drop(&mut self) {}
+}
+type NoDrop$0 = core::mem::ManuallyDrop<NeedsDrop>;
+    "#,
+        expect![[r#"
+            *NoDrop*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            type NoDrop = core::mem::ManuallyDrop<NeedsDrop>
+            ```
+
+            ---
+
+            size = 0, align = 1, no Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: drop
+struct NeedsDrop;
+impl Drop for NeedsDrop {
+    fn drop(&mut self) {}
+}
+struct DropField$0 {
+    _x: i32,
+    _y: NeedsDrop,
+}
+    "#,
+        expect![[r#"
+            *DropField*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            struct DropField {
+                _x: i32,
+                _y: NeedsDrop,
+            }
+            ```
+
+            ---
+
+            size = 4, align = 4, needs Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: sized
+type Foo$0 = impl Sized;
+    "#,
+        expect![[r#"
+            *Foo*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            type Foo = impl Sized
+            ```
+
+            ---
+
+            needs Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: drop
+struct NeedsDrop;
+impl Drop for NeedsDrop {
+    fn drop(&mut self) {}
+}
+enum Enum {
+    A$0(&'static str),
+    B(NeedsDrop)
+}
+    "#,
+        expect![[r#"
+            *A*
+
+            ```rust
+            ra_test_fixture::Enum
+            ```
+
+            ```rust
+            A(&'static str)
+            ```
+
+            ---
+
+            size = 16 (0x10), align = 8, niches = 1, no Drop
+        "#]],
+    );
+    check(
+        r#"
+struct Foo$0<T>(T);
+    "#,
+        expect![[r#"
+            *Foo*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            struct Foo<T>(T)
+            ```
+
+            ---
+
+            type param may need Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: copy
+struct Foo$0<T: Copy>(T);
+    "#,
+        expect![[r#"
+            *Foo*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            struct Foo<T>(T)
+            where
+                T: Copy,
+            ```
+
+            ---
+
+            no Drop
+        "#]],
+    );
+    check(
+        r#"
+//- minicore: copy
+trait Trait {
+    type Assoc: Copy;
+}
+struct Foo$0<T: Trait>(T::Assoc);
+    "#,
+        expect![[r#"
+            *Foo*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            struct Foo<T>(<T as Trait>::Assoc)
+            where
+                T: Trait,
+            ```
+
+            ---
+
+            no Drop
+        "#]],
+    );
+    check(
+        r#"
+#[rustc_coherence_is_core]
+
+#[lang = "manually_drop"]
+#[repr(transparent)]
+pub struct ManuallyDrop$0<T: ?Sized> {
+    value: T,
+}
+    "#,
+        expect![[r#"
+            *ManuallyDrop*
+
+            ```rust
+            ra_test_fixture
+            ```
+
+            ```rust
+            pub struct ManuallyDrop<T>
+            where
+                T: ?Sized,
+            {
+                value: T,
+            }
+            ```
+
+            ---
+
+            no Drop
+        "#]],
+    );
+}
+
+#[test]
+fn projection_const() {
+    // This uses two crates, which have *no* relation between them, to test another thing:
+    // `render_const_scalar()` used to just use the last crate for the trait env, which will
+    // fail in this scenario.
+    check(
+        r#"
+//- /foo.rs crate:foo
+pub trait PublicFlags {
+    type Internal;
+}
+
+pub struct NoteDialects(<NoteDialects as PublicFlags>::Internal);
+
+impl NoteDialects {
+    pub const CLAP$0: Self = Self(InternalBitFlags);
+}
+
+pub struct InternalBitFlags;
+
+impl PublicFlags for NoteDialects {
+    type Internal = InternalBitFlags;
+}
+//- /bar.rs crate:bar
+    "#,
+        expect![[r#"
+            *CLAP*
+
+            ```rust
+            foo::NoteDialects
+            ```
+
+            ```rust
+            pub const CLAP: Self = NoteDialects(InternalBitFlags)
+            ```
+        "#]],
+    );
+}
+
+#[test]
+fn bounds_from_container_do_not_panic() {
+    check(
+        r#"
+//- minicore: copy
+struct Foo<T>(T);
+
+impl<T: Copy> Foo<T> {
+    fn foo<U: Copy>(&self, _u: U) {}
+}
+
+fn bar(v: &Foo<i32>) {
+    v.$0foo(1u32);
+}
+    "#,
+        expect![[r#"
+            *foo*
+
+            ```rust
+            ra_test_fixture::Foo
+            ```
+
+            ```rust
+            impl<T> Foo<T>
+            fn foo<U>(&self, _u: U)
+            where
+                U: Copy,
+                // Bounds from impl:
+                T: Copy,
+            ```
+
+            ---
+
+            `T` = `i32`, `U` = `u32`
+        "#]],
+    );
+}
+
+#[test]
+fn extra_lifetime_param_on_trait_method_subst() {
+    check(
+        r#"
+struct AudioFormat;
+
+trait ValueEnum {
+    fn to_possible_value(&self);
+}
+
+impl ValueEnum for AudioFormat {
+    fn to_possible_value<'a>(&'a self) {}
+}
+
+fn main() {
+    ValueEnum::to_possible_value$0(&AudioFormat);
+}
+    "#,
+        expect![[r#"
+            *to_possible_value*
+
+            ```rust
+            ra_test_fixture::AudioFormat
+            ```
+
+            ```rust
+            fn to_possible_value<'a>(&'a self)
+            ```
         "#]],
     );
 }

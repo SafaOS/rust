@@ -468,7 +468,7 @@ pub(crate) fn encode_ty<'tcx>(
                         )]
                         tcx.dcx()
                             .struct_span_err(
-                                cfi_encoding.span,
+                                cfi_encoding.span(),
                                 format!("invalid `cfi_encoding` for `{:?}`", ty.kind()),
                             )
                             .emit();
@@ -519,7 +519,7 @@ pub(crate) fn encode_ty<'tcx>(
                         )]
                         tcx.dcx()
                             .struct_span_err(
-                                cfi_encoding.span,
+                                cfi_encoding.span(),
                                 format!("invalid `cfi_encoding` for `{:?}`", ty.kind()),
                             )
                             .emit();
@@ -716,11 +716,15 @@ fn encode_ty_name(tcx: TyCtxt<'_>, def_id: DefId) -> String {
             hir::definitions::DefPathData::Ctor => "c",
             hir::definitions::DefPathData::AnonConst => "k",
             hir::definitions::DefPathData::OpaqueTy => "i",
+            hir::definitions::DefPathData::SyntheticCoroutineBody => "s",
+            hir::definitions::DefPathData::NestedStatic => "n",
             hir::definitions::DefPathData::CrateRoot
             | hir::definitions::DefPathData::Use
             | hir::definitions::DefPathData::GlobalAsm
             | hir::definitions::DefPathData::MacroNs(..)
-            | hir::definitions::DefPathData::LifetimeNs(..) => {
+            | hir::definitions::DefPathData::OpaqueLifetime(..)
+            | hir::definitions::DefPathData::LifetimeNs(..)
+            | hir::definitions::DefPathData::AnonAssocTy(..) => {
                 bug!("encode_ty_name: unexpected `{:?}`", disambiguated_data.data);
             }
         });

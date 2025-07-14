@@ -31,6 +31,7 @@ mod sparc64;
 mod wasm;
 mod x86;
 mod x86_64;
+mod x86_win32;
 mod x86_win64;
 mod xtensa;
 
@@ -38,7 +39,7 @@ mod xtensa;
 pub enum PassMode {
     /// Ignore the argument.
     ///
-    /// The argument is either uninhabited or a ZST.
+    /// The argument is a ZST.
     Ignore,
     /// Pass the argument directly.
     ///
@@ -143,6 +144,7 @@ pub struct ArgAttributes {
     /// (corresponding to LLVM's dereferenceable_or_null attributes, i.e., it is okay for this to be
     /// set on a null pointer, but all non-null pointers must be dereferenceable).
     pub pointee_size: Size,
+    /// The minimum alignment of the pointee, if any.
     pub pointee_align: Option<Align>,
 }
 
@@ -350,7 +352,6 @@ impl<'a, Ty> ArgAbi<'a, Ty> {
         scalar_attrs: impl Fn(&TyAndLayout<'a, Ty>, Scalar, Size) -> ArgAttributes,
     ) -> Self {
         let mode = match layout.backend_repr {
-            BackendRepr::Uninhabited => PassMode::Ignore,
             BackendRepr::Scalar(scalar) => {
                 PassMode::Direct(scalar_attrs(&layout, scalar, Size::ZERO))
             }
@@ -358,7 +359,7 @@ impl<'a, Ty> ArgAbi<'a, Ty> {
                 scalar_attrs(&layout, a, Size::ZERO),
                 scalar_attrs(&layout, b, a.size(cx).align_to(b.align(cx).abi)),
             ),
-            BackendRepr::Vector { .. } => PassMode::Direct(ArgAttributes::new()),
+            BackendRepr::SimdVector { .. } => PassMode::Direct(ArgAttributes::new()),
             BackendRepr::Memory { .. } => Self::indirect_pass_mode(&layout),
         };
         ArgAbi { layout, mode }
@@ -386,6 +387,7 @@ impl<'a, Ty> ArgAbi<'a, Ty> {
     /// Pass this argument directly instead. Should NOT be used!
     /// Only exists because of past ABI mistakes that will take time to fix
     /// (see <https://github.com/rust-lang/rust/issues/115666>).
+    #[track_caller]
     pub fn make_direct_deprecated(&mut self) {
         match self.mode {
             PassMode::Indirect { .. } => {
@@ -398,6 +400,7 @@ impl<'a, Ty> ArgAbi<'a, Ty> {
 
     /// Pass this argument indirectly, by passing a (thin or wide) pointer to the argument instead.
     /// This is valid for both sized and unsized arguments.
+    #[track_caller]
     pub fn make_indirect(&mut self) {
         match self.mode {
             PassMode::Direct(_) | PassMode::Pair(_, _) => {
@@ -412,6 +415,7 @@ impl<'a, Ty> ArgAbi<'a, Ty> {
 
     /// Same as `make_indirect`, but for arguments that are ignored. Only needed for ABIs that pass
     /// ZSTs indirectly.
+    #[track_caller]
     pub fn make_indirect_from_ignore(&mut self) {
         match self.mode {
             PassMode::Ignore => {
@@ -647,7 +651,11 @@ impl<'a, Ty> FnAbi<'a, Ty> {
                 };
                 let reg_struct_return = cx.x86_abi_opt().reg_struct_return;
                 let opts = x86::X86Options { flavor, regparm, reg_struct_return };
-                x86::compute_abi_info(cx, self, opts);
+                if spec.is_like_msvc {
+                    x86_win32::compute_abi_info(cx, self, opts);
+                } else {
+                    x86::compute_abi_info(cx, self, opts);
+                }
             }
             "x86_64" => match abi {
                 ExternAbi::SysV64 { .. } => x86_64::compute_abi_info(cx, self),
@@ -663,7 +671,7 @@ impl<'a, Ty> FnAbi<'a, Ty> {
                 }
             },
             "aarch64" | "arm64ec" => {
-                let kind = if cx.target_spec().is_like_osx {
+                let kind = if cx.target_spec().is_like_darwin {
                     aarch64::AbiKind::DarwinPCS
                 } else if cx.target_spec().is_like_windows {
                     aarch64::AbiKind::Win64
@@ -698,7 +706,7 @@ impl<'a, Ty> FnAbi<'a, Ty> {
             "xtensa" => xtensa::compute_abi_info(cx, self),
             "riscv32" | "riscv64" => riscv::compute_abi_info(cx, self),
             "wasm32" => {
-                if spec.os == "unknown" && cx.wasm_c_abi_opt() == WasmCAbi::Legacy {
+                if spec.os == "unknown" && matches!(cx.wasm_c_abi_opt(), WasmCAbi::Legacy { .. }) {
                     wasm::compute_wasm_abi_info(self)
                 } else {
                     wasm::compute_c_abi_info(cx, self)
@@ -710,16 +718,16 @@ impl<'a, Ty> FnAbi<'a, Ty> {
         }
     }
 
-    pub fn adjust_for_rust_abi<C>(&mut self, cx: &C, abi: ExternAbi)
+    pub fn adjust_for_rust_abi<C>(&mut self, cx: &C)
     where
         Ty: TyAbiInterface<'a, C> + Copy,
         C: HasDataLayout + HasTargetSpec,
     {
         let spec = cx.target_spec();
-        match &spec.arch[..] {
-            "x86" => x86::compute_rust_abi_info(cx, self, abi),
-            "riscv32" | "riscv64" => riscv::compute_rust_abi_info(cx, self, abi),
-            "loongarch64" => loongarch::compute_rust_abi_info(cx, self, abi),
+        match &*spec.arch {
+            "x86" => x86::compute_rust_abi_info(cx, self),
+            "riscv32" | "riscv64" => riscv::compute_rust_abi_info(cx, self),
+            "loongarch64" => loongarch::compute_rust_abi_info(cx, self),
             "aarch64" => aarch64::compute_rust_abi_info(cx, self),
             _ => {}
         };
@@ -731,12 +739,15 @@ impl<'a, Ty> FnAbi<'a, Ty> {
             .map(|(idx, arg)| (Some(idx), arg))
             .chain(iter::once((None, &mut self.ret)))
         {
-            if arg.is_ignore() {
+            // If the logic above already picked a specific type to cast the argument to, leave that
+            // in place.
+            if matches!(arg.mode, PassMode::Ignore | PassMode::Cast { .. }) {
                 continue;
             }
 
             if arg_idx.is_none()
                 && arg.layout.size > Primitive::Pointer(AddressSpace::DATA).size(cx) * 2
+                && !matches!(arg.layout.backend_repr, BackendRepr::SimdVector { .. })
             {
                 // Return values larger than 2 registers using a return area
                 // pointer. LLVM and Cranelift disagree about how to return
@@ -746,7 +757,8 @@ impl<'a, Ty> FnAbi<'a, Ty> {
                 // return value independently and decide to pass it in a
                 // register or not, which would result in the return value
                 // being passed partially in registers and partially through a
-                // return area pointer.
+                // return area pointer. For large IR-level values such as `i128`,
+                // cranelift will even split up the value into smaller chunks.
                 //
                 // While Cranelift may need to be fixed as the LLVM behavior is
                 // generally more correct with respect to the surface language,
@@ -776,53 +788,58 @@ impl<'a, Ty> FnAbi<'a, Ty> {
                 // rustc_target already ensure any return value which doesn't
                 // fit in the available amount of return registers is passed in
                 // the right way for the current target.
+                //
+                // The adjustment is not necessary nor desired for types with a vector
+                // representation; those are handled below.
                 arg.make_indirect();
                 continue;
             }
 
             match arg.layout.backend_repr {
-                BackendRepr::Memory { .. } => {}
+                BackendRepr::Memory { .. } => {
+                    // Compute `Aggregate` ABI.
 
-                // This is a fun case! The gist of what this is doing is
-                // that we want callers and callees to always agree on the
-                // ABI of how they pass SIMD arguments. If we were to *not*
-                // make these arguments indirect then they'd be immediates
-                // in LLVM, which means that they'd used whatever the
-                // appropriate ABI is for the callee and the caller. That
-                // means, for example, if the caller doesn't have AVX
-                // enabled but the callee does, then passing an AVX argument
-                // across this boundary would cause corrupt data to show up.
-                //
-                // This problem is fixed by unconditionally passing SIMD
-                // arguments through memory between callers and callees
-                // which should get them all to agree on ABI regardless of
-                // target feature sets. Some more information about this
-                // issue can be found in #44367.
-                //
-                // Note that the intrinsic ABI is exempt here as
-                // that's how we connect up to LLVM and it's unstable
-                // anyway, we control all calls to it in libstd.
-                BackendRepr::Vector { .. }
-                    if abi != ExternAbi::RustIntrinsic && spec.simd_types_indirect =>
-                {
-                    arg.make_indirect();
-                    continue;
+                    let is_indirect_not_on_stack =
+                        matches!(arg.mode, PassMode::Indirect { on_stack: false, .. });
+                    assert!(is_indirect_not_on_stack);
+
+                    let size = arg.layout.size;
+                    if arg.layout.is_sized()
+                        && size <= Primitive::Pointer(AddressSpace::DATA).size(cx)
+                    {
+                        // We want to pass small aggregates as immediates, but using
+                        // an LLVM aggregate type for this leads to bad optimizations,
+                        // so we pick an appropriately sized integer type instead.
+                        arg.cast_to(Reg { kind: RegKind::Integer, size });
+                    }
                 }
 
-                _ => continue,
-            }
-            // Compute `Aggregate` ABI.
+                BackendRepr::SimdVector { .. } => {
+                    // This is a fun case! The gist of what this is doing is
+                    // that we want callers and callees to always agree on the
+                    // ABI of how they pass SIMD arguments. If we were to *not*
+                    // make these arguments indirect then they'd be immediates
+                    // in LLVM, which means that they'd used whatever the
+                    // appropriate ABI is for the callee and the caller. That
+                    // means, for example, if the caller doesn't have AVX
+                    // enabled but the callee does, then passing an AVX argument
+                    // across this boundary would cause corrupt data to show up.
+                    //
+                    // This problem is fixed by unconditionally passing SIMD
+                    // arguments through memory between callers and callees
+                    // which should get them all to agree on ABI regardless of
+                    // target feature sets. Some more information about this
+                    // issue can be found in #44367.
+                    //
+                    // We *could* do better in some cases, e.g. on x86_64 targets where SSE2 is
+                    // required. However, it turns out that that makes LLVM worse at optimizing this
+                    // code, so we pass things indirectly even there. See #139029 for more on that.
+                    if spec.simd_types_indirect {
+                        arg.make_indirect();
+                    }
+                }
 
-            let is_indirect_not_on_stack =
-                matches!(arg.mode, PassMode::Indirect { on_stack: false, .. });
-            assert!(is_indirect_not_on_stack);
-
-            let size = arg.layout.size;
-            if !arg.layout.is_unsized() && size <= Primitive::Pointer(AddressSpace::DATA).size(cx) {
-                // We want to pass small aggregates as immediates, but using
-                // an LLVM aggregate type for this leads to bad optimizations,
-                // so we pick an appropriately sized integer type instead.
-                arg.cast_to(Reg { kind: RegKind::Integer, size });
+                _ => {}
             }
         }
     }

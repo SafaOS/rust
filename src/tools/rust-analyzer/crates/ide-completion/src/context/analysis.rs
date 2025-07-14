@@ -2,24 +2,28 @@
 use std::iter;
 
 use hir::{ExpandResult, Semantics, Type, TypeInfo, Variant};
-use ide_db::{active_parameter::ActiveParameter, RootDatabase};
+use ide_db::{RootDatabase, active_parameter::ActiveParameter};
 use itertools::Either;
 use syntax::{
-    algo::{self, ancestors_at_offset, find_node_at_offset, non_trivia_sibling},
+    AstNode, AstToken, Direction, NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken,
+    T, TextRange, TextSize,
+    algo::{
+        self, ancestors_at_offset, find_node_at_offset, non_trivia_sibling,
+        previous_non_trivia_token,
+    },
     ast::{
         self, AttrKind, HasArgList, HasGenericArgs, HasGenericParams, HasLoopBody, HasName,
         NameOrNameRef,
     },
-    match_ast, AstNode, AstToken, Direction, NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode,
-    SyntaxToken, TextRange, TextSize, T,
+    match_ast,
 };
 
 use crate::context::{
-    AttrCtx, BreakableKind, CompletionAnalysis, DotAccess, DotAccessExprCtx, DotAccessKind,
-    ItemListKind, LifetimeContext, LifetimeKind, NameContext, NameKind, NameRefContext,
-    NameRefKind, ParamContext, ParamKind, PathCompletionCtx, PathExprCtx, PathKind, PatternContext,
-    PatternRefutability, Qualified, QualifierCtx, TypeAscriptionTarget, TypeLocation,
-    COMPLETION_MARKER,
+    AttrCtx, BreakableKind, COMPLETION_MARKER, CompletionAnalysis, DotAccess, DotAccessExprCtx,
+    DotAccessKind, ItemListKind, LifetimeContext, LifetimeKind, NameContext, NameKind,
+    NameRefContext, NameRefKind, ParamContext, ParamKind, PathCompletionCtx, PathExprCtx, PathKind,
+    PatternContext, PatternRefutability, Qualified, QualifierCtx, TypeAscriptionTarget,
+    TypeLocation,
 };
 
 #[derive(Debug)]
@@ -97,7 +101,8 @@ fn token_at_offset_ignore_whitespace(file: &SyntaxNode, offset: TextSize) -> Opt
 /// We do this by recursively expanding all macros and picking the best possible match. We cannot just
 /// choose the first expansion each time because macros can expand to something that does not include
 /// our completion marker, e.g.:
-/// ```
+///
+/// ```ignore
 /// macro_rules! helper { ($v:ident) => {} }
 /// macro_rules! my_macro {
 ///     ($v:ident) => {
@@ -106,7 +111,7 @@ fn token_at_offset_ignore_whitespace(file: &SyntaxNode, offset: TextSize) -> Opt
 ///     };
 /// }
 ///
-/// my_macro!(complete_me_here)
+/// my_macro!(complete_me_here);
 /// ```
 /// If we would expand the first thing we encounter only (which in fact this method used to do), we would
 /// be unable to complete here, because we would be walking directly into the void. So we instead try
@@ -382,11 +387,7 @@ fn expand(
 
     match (
         sema.expand_macro_call(&actual_macro_call),
-        sema.speculative_expand_macro_call(
-            &actual_macro_call,
-            &speculative_args,
-            fake_ident_token.clone(),
-        ),
+        sema.speculative_expand_macro_call(&actual_macro_call, &speculative_args, fake_ident_token),
     ) {
         // successful expansions
         (Some(actual_expansion), Some((fake_expansion, fake_mapped_tokens))) => {
@@ -656,9 +657,8 @@ fn expected_type_and_name(
                             ))
                         } else {
                             cov_mark::hit!(expected_type_struct_field_without_leading_char);
-                            let expr_field = token.prev_sibling_or_token()?
-                                .into_node()
-                                .and_then(ast::RecordExprField::cast)?;
+                            cov_mark::hit!(expected_type_struct_field_followed_by_comma);
+                            let expr_field = previous_non_trivia_token(token.clone())?.parent().and_then(ast::RecordExprField::cast)?;
                             let (_, _, ty) = sema.resolve_record_field(&expr_field)?;
                             Some((
                                 Some(ty),
@@ -676,7 +676,6 @@ fn expected_type_and_name(
                             .or_else(|| sema.type_of_expr(&expr).map(TypeInfo::original));
                         (ty, field_name)
                     } else {
-                        cov_mark::hit!(expected_type_struct_field_followed_by_comma);
                         (field_ty, field_name)
                     }
                 },
@@ -1809,22 +1808,6 @@ fn is_in_block(node: &SyntaxNode) -> bool {
     node.parent()
         .map(|node| ast::ExprStmt::can_cast(node.kind()) || ast::StmtList::can_cast(node.kind()))
         .unwrap_or(false)
-}
-
-fn previous_non_trivia_token(e: impl Into<SyntaxElement>) -> Option<SyntaxToken> {
-    let mut token = match e.into() {
-        SyntaxElement::Node(n) => n.first_token()?,
-        SyntaxElement::Token(t) => t,
-    }
-    .prev_token();
-    while let Some(inner) = token {
-        if !inner.kind().is_trivia() {
-            return Some(inner);
-        } else {
-            token = inner.prev_token();
-        }
-    }
-    None
 }
 
 fn next_non_trivia_token(e: impl Into<SyntaxElement>) -> Option<SyntaxToken> {

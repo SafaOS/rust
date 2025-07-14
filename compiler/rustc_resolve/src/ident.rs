@@ -296,9 +296,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     ) -> Option<LexicalScopeBinding<'ra>> {
         assert!(ns == TypeNS || ns == ValueNS);
         let orig_ident = ident;
-        if ident.name == kw::Empty {
-            return Some(LexicalScopeBinding::Res(Res::Err));
-        }
         let (general_span, normalized_span) = if ident.name == kw::SelfUpper {
             // FIXME(jseyfried) improve `Self` hygiene
             let empty_span = ident.span.with_ctxt(SyntaxContext::root());
@@ -1117,13 +1114,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         debug!("validate_res_from_ribs({:?})", res);
         let ribs = &all_ribs[rib_index + 1..];
 
-        // An invalid forward use of a generic parameter from a previous default.
-        if let RibKind::ForwardGenericParamBan = all_ribs[rib_index].kind {
+        // An invalid forward use of a generic parameter from a previous default
+        // or in a const param ty.
+        if let RibKind::ForwardGenericParamBan(reason) = all_ribs[rib_index].kind {
             if let Some(span) = finalize {
                 let res_error = if rib_ident.name == kw::SelfUpper {
-                    ResolutionError::SelfInGenericParamDefault
+                    ResolutionError::ForwardDeclaredSelf(reason)
                 } else {
-                    ResolutionError::ForwardDeclaredGenericParam
+                    ResolutionError::ForwardDeclaredGenericParam(rib_ident.name, reason)
                 };
                 self.report_error(span, res_error);
             }
@@ -1142,7 +1140,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         | RibKind::FnOrCoroutine
                         | RibKind::Module(..)
                         | RibKind::MacroDefinition(..)
-                        | RibKind::ForwardGenericParamBan => {
+                        | RibKind::ForwardGenericParamBan(_) => {
                             // Nothing to do. Continue.
                         }
                         RibKind::Item(..) | RibKind::AssocItem => {
@@ -1209,10 +1207,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             if let Some(span) = finalize {
                                 self.report_error(
                                     span,
-                                    ParamInTyOfConstParam {
-                                        name: rib_ident.name,
-                                        param_kind: None,
-                                    },
+                                    ParamInTyOfConstParam { name: rib_ident.name },
                                 );
                             }
                             return Res::Err;
@@ -1239,9 +1234,25 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         | RibKind::MacroDefinition(..)
                         | RibKind::InlineAsmSym
                         | RibKind::AssocItem
-                        | RibKind::ForwardGenericParamBan => {
+                        | RibKind::ForwardGenericParamBan(_) => {
                             // Nothing to do. Continue.
                             continue;
+                        }
+
+                        RibKind::ConstParamTy => {
+                            if !self.tcx.features().generic_const_parameter_types() {
+                                if let Some(span) = finalize {
+                                    self.report_error(
+                                        span,
+                                        ResolutionError::ParamInTyOfConstParam {
+                                            name: rib_ident.name,
+                                        },
+                                    );
+                                }
+                                return Res::Err;
+                            } else {
+                                continue;
+                            }
                         }
 
                         RibKind::ConstantItem(trivial, _) => {
@@ -1292,18 +1303,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         RibKind::Item(has_generic_params, def_kind) => {
                             (has_generic_params, def_kind)
                         }
-                        RibKind::ConstParamTy => {
-                            if let Some(span) = finalize {
-                                self.report_error(
-                                    span,
-                                    ResolutionError::ParamInTyOfConstParam {
-                                        name: rib_ident.name,
-                                        param_kind: Some(errors::ParamKindInTyOfConstParam::Type),
-                                    },
-                                );
-                            }
-                            return Res::Err;
-                        }
                     };
 
                     if let Some(span) = finalize {
@@ -1328,7 +1327,23 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         | RibKind::MacroDefinition(..)
                         | RibKind::InlineAsmSym
                         | RibKind::AssocItem
-                        | RibKind::ForwardGenericParamBan => continue,
+                        | RibKind::ForwardGenericParamBan(_) => continue,
+
+                        RibKind::ConstParamTy => {
+                            if !self.tcx.features().generic_const_parameter_types() {
+                                if let Some(span) = finalize {
+                                    self.report_error(
+                                        span,
+                                        ResolutionError::ParamInTyOfConstParam {
+                                            name: rib_ident.name,
+                                        },
+                                    );
+                                }
+                                return Res::Err;
+                            } else {
+                                continue;
+                            }
+                        }
 
                         RibKind::ConstantItem(trivial, _) => {
                             if let ConstantHasGenerics::No(cause) = trivial {
@@ -1361,18 +1376,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         RibKind::Item(has_generic_params, def_kind) => {
                             (has_generic_params, def_kind)
                         }
-                        RibKind::ConstParamTy => {
-                            if let Some(span) = finalize {
-                                self.report_error(
-                                    span,
-                                    ResolutionError::ParamInTyOfConstParam {
-                                        name: rib_ident.name,
-                                        param_kind: Some(errors::ParamKindInTyOfConstParam::Const),
-                                    },
-                                );
-                            }
-                            return Res::Err;
-                        }
                     };
 
                     // This was an attempt to use a const parameter outside its scope.
@@ -1391,6 +1394,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
             _ => {}
         }
+
         res
     }
 

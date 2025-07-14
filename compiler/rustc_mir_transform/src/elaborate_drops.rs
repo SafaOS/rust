@@ -138,6 +138,10 @@ impl InitializationData<'_, '_> {
 impl<'a, 'tcx> DropElaborator<'a, 'tcx> for ElaborateDropsCtxt<'a, 'tcx> {
     type Path = MovePathIndex;
 
+    fn patch_ref(&self) -> &MirPatch<'tcx> {
+        &self.patch
+    }
+
     fn patch(&mut self) -> &mut MirPatch<'tcx> {
         &mut self.patch
     }
@@ -152,6 +156,14 @@ impl<'a, 'tcx> DropElaborator<'a, 'tcx> for ElaborateDropsCtxt<'a, 'tcx> {
 
     fn typing_env(&self) -> ty::TypingEnv<'tcx> {
         self.env.typing_env
+    }
+
+    fn allow_async_drops(&self) -> bool {
+        true
+    }
+
+    fn terminator_loc(&self, bb: BasicBlock) -> Location {
+        self.patch.terminator_loc(self.body, bb)
     }
 
     #[instrument(level = "debug", skip(self), ret)]
@@ -324,7 +336,9 @@ impl<'a, 'tcx> ElaborateDropsCtxt<'a, 'tcx> {
         // This function should mirror what `collect_drop_flags` does.
         for (bb, data) in self.body.basic_blocks.iter_enumerated() {
             let terminator = data.terminator();
-            let TerminatorKind::Drop { place, target, unwind, replace } = terminator.kind else {
+            let TerminatorKind::Drop { place, target, unwind, replace, drop, async_fut: _ } =
+                terminator.kind
+            else {
                 continue;
             };
 
@@ -360,7 +374,16 @@ impl<'a, 'tcx> ElaborateDropsCtxt<'a, 'tcx> {
                         }
                     };
                     self.init_data.seek_before(self.body.terminator_loc(bb));
-                    elaborate_drop(self, terminator.source_info, place, path, target, unwind, bb)
+                    elaborate_drop(
+                        self,
+                        terminator.source_info,
+                        place,
+                        path,
+                        target,
+                        unwind,
+                        bb,
+                        drop,
+                    )
                 }
                 LookupResult::Parent(None) => {}
                 LookupResult::Parent(Some(_)) => {
@@ -413,7 +436,7 @@ impl<'a, 'tcx> ElaborateDropsCtxt<'a, 'tcx> {
                 ..
             } = data.terminator().kind
             {
-                assert!(!self.patch.is_patched(bb));
+                assert!(!self.patch.is_term_patched(bb));
 
                 let loc = Location { block: tgt, statement_index: 0 };
                 let path = self.move_data().rev_lookup.find(destination.as_ref());
@@ -458,7 +481,7 @@ impl<'a, 'tcx> ElaborateDropsCtxt<'a, 'tcx> {
                             // a Goto; see `MirPatch::new`).
                         }
                         _ => {
-                            assert!(!self.patch.is_patched(bb));
+                            assert!(!self.patch.is_term_patched(bb));
                         }
                     }
                 }
@@ -482,7 +505,7 @@ impl<'a, 'tcx> ElaborateDropsCtxt<'a, 'tcx> {
                 ..
             } = data.terminator().kind
             {
-                assert!(!self.patch.is_patched(bb));
+                assert!(!self.patch.is_term_patched(bb));
 
                 let loc = Location { block: bb, statement_index: data.statements.len() };
                 let path = self.move_data().rev_lookup.find(destination.as_ref());

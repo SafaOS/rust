@@ -63,7 +63,7 @@ fn uncached_gcc_type<'gcc, 'tcx>(
 ) -> Type<'gcc> {
     match layout.backend_repr {
         BackendRepr::Scalar(_) => bug!("handled elsewhere"),
-        BackendRepr::Vector { ref element, count } => {
+        BackendRepr::SimdVector { ref element, count } => {
             let element = layout.scalar_gcc_type_at(cx, element, Size::ZERO);
             let element =
                 // NOTE: gcc doesn't allow pointer types in vectors.
@@ -84,7 +84,7 @@ fn uncached_gcc_type<'gcc, 'tcx>(
                 false,
             );
         }
-        BackendRepr::Uninhabited | BackendRepr::Memory { .. } => {}
+        BackendRepr::Memory { .. } => {}
     }
 
     let name = match *layout.ty.kind() {
@@ -102,10 +102,10 @@ fn uncached_gcc_type<'gcc, 'tcx>(
             let mut name = with_no_trimmed_paths!(layout.ty.to_string());
             if let (&ty::Adt(def, _), &Variants::Single { index }) =
                 (layout.ty.kind(), &layout.variants)
+                && def.is_enum()
+                && !def.variants().is_empty()
             {
-                if def.is_enum() && !def.variants().is_empty() {
-                    write!(&mut name, "::{}", def.variant(index).name).unwrap();
-                }
+                write!(&mut name, "::{}", def.variant(index).name).unwrap();
             }
             if let (&ty::Coroutine(_, _), &Variants::Single { index }) =
                 (layout.ty.kind(), &layout.variants)
@@ -178,19 +178,16 @@ pub trait LayoutGccExt<'tcx> {
 impl<'tcx> LayoutGccExt<'tcx> for TyAndLayout<'tcx> {
     fn is_gcc_immediate(&self) -> bool {
         match self.backend_repr {
-            BackendRepr::Scalar(_) | BackendRepr::Vector { .. } => true,
-            BackendRepr::ScalarPair(..) | BackendRepr::Uninhabited | BackendRepr::Memory { .. } => {
-                false
-            }
+            BackendRepr::Scalar(_) | BackendRepr::SimdVector { .. } => true,
+            BackendRepr::ScalarPair(..) | BackendRepr::Memory { .. } => false,
         }
     }
 
     fn is_gcc_scalar_pair(&self) -> bool {
         match self.backend_repr {
             BackendRepr::ScalarPair(..) => true,
-            BackendRepr::Uninhabited
-            | BackendRepr::Scalar(_)
-            | BackendRepr::Vector { .. }
+            BackendRepr::Scalar(_)
+            | BackendRepr::SimdVector { .. }
             | BackendRepr::Memory { .. } => false,
         }
     }
@@ -267,10 +264,10 @@ impl<'tcx> LayoutGccExt<'tcx> for TyAndLayout<'tcx> {
     }
 
     fn immediate_gcc_type<'gcc>(&self, cx: &CodegenCx<'gcc, 'tcx>) -> Type<'gcc> {
-        if let BackendRepr::Scalar(ref scalar) = self.backend_repr {
-            if scalar.is_bool() {
-                return cx.type_i1();
-            }
+        if let BackendRepr::Scalar(ref scalar) = self.backend_repr
+            && scalar.is_bool()
+        {
+            return cx.type_i1();
         }
         self.gcc_type(cx)
     }

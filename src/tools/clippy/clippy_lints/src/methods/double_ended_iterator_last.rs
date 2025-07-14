@@ -1,11 +1,11 @@
-use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::is_trait_method;
-use clippy_utils::ty::implements_trait;
+use clippy_utils::diagnostics::span_lint_and_then;
+use clippy_utils::ty::{has_non_owning_mutable_access, implements_trait};
+use clippy_utils::{is_mutable, is_trait_method, path_to_local, sym};
 use rustc_errors::Applicability;
-use rustc_hir::Expr;
+use rustc_hir::{Expr, Node, PatKind};
 use rustc_lint::LateContext;
 use rustc_middle::ty::Instance;
-use rustc_span::{Span, sym};
+use rustc_span::Span;
 
 use super::DOUBLE_ENDED_ITERATOR_LAST;
 
@@ -24,18 +24,56 @@ pub(super) fn check(cx: &LateContext<'_>, expr: &'_ Expr<'_>, self_expr: &'_ Exp
         && let Ok(Some(fn_def)) = Instance::try_resolve(cx.tcx, cx.typing_env(), id, args)
         // find the provided definition of Iterator::last
         && let Some(item) = cx.tcx.get_diagnostic_item(sym::Iterator)
-        && let Some(last_def) = cx.tcx.provided_trait_methods(item).find(|m| m.name.as_str() == "last")
+        && let Some(last_def) = cx.tcx.provided_trait_methods(item).find(|m| m.name() == sym::last)
         // if the resolved method is the same as the provided definition
         && fn_def.def_id() == last_def.def_id
+        && let self_ty = cx.typeck_results().expr_ty(self_expr)
+        && !has_non_owning_mutable_access(cx, self_ty)
     {
-        span_lint_and_sugg(
+        let mut sugg = vec![(call_span, String::from("next_back()"))];
+        let mut dont_apply = false;
+
+        // if `self_expr` is a reference, it is mutable because it is used for `.last()`
+        // TODO: Change this to lint only when the referred iterator is not used later. If it is used later,
+        // changing to `next_back()` may change its behavior.
+        if !(is_mutable(cx, self_expr) || self_type.is_ref()) {
+            if let Some(hir_id) = path_to_local(self_expr)
+                && let Node::Pat(pat) = cx.tcx.hir_node(hir_id)
+                && let PatKind::Binding(_, _, ident, _) = pat.kind
+            {
+                sugg.push((ident.span.shrink_to_lo(), String::from("mut ")));
+            } else {
+                // If we can't make the binding mutable, make the suggestion `Unspecified` to prevent it from being
+                // automatically applied, and add a complementary help message.
+                dont_apply = true;
+            }
+        }
+        span_lint_and_then(
             cx,
             DOUBLE_ENDED_ITERATOR_LAST,
-            call_span,
+            expr.span,
             "called `Iterator::last` on a `DoubleEndedIterator`; this will needlessly iterate the entire iterator",
-            "try",
-            "next_back()".to_string(),
-            Applicability::MachineApplicable,
+            |diag| {
+                let expr_ty = cx.typeck_results().expr_ty(expr);
+                let droppable_elements = expr_ty.has_significant_drop(cx.tcx, cx.typing_env());
+                diag.multipart_suggestion(
+                    "try",
+                    sugg,
+                    if dont_apply {
+                        Applicability::Unspecified
+                    } else if droppable_elements {
+                        Applicability::MaybeIncorrect
+                    } else {
+                        Applicability::MachineApplicable
+                    },
+                );
+                if droppable_elements {
+                    diag.note("this change will alter drop order which may be undesirable");
+                }
+                if dont_apply {
+                    diag.span_note(self_expr.span, "this must be made mutable to use `.next_back()`");
+                }
+            },
         );
     }
 }

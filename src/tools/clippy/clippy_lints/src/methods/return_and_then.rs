@@ -44,7 +44,7 @@ pub(super) fn check<'tcx>(
     };
 
     let closure_arg = fn_decl.inputs[0];
-    let closure_expr = peel_blocks(cx.tcx.hir().body(body).value);
+    let closure_expr = peel_blocks(cx.tcx.hir_body(body).value);
 
     let mut applicability = Applicability::MachineApplicable;
     let arg_snip = snippet_with_applicability(cx, closure_arg.span, "_", &mut applicability);
@@ -55,13 +55,20 @@ pub(super) fn check<'tcx>(
         None => &body_snip,
     };
 
-    let msg = "use the question mark operator instead of an `and_then` call";
     let sugg = format!(
         "let {} = {}?;\n{}",
         arg_snip,
         recv_snip,
-        reindent_multiline(inner.into(), false, indent_of(cx, expr.span))
+        reindent_multiline(inner, false, indent_of(cx, expr.span))
     );
 
-    span_lint_and_sugg(cx, RETURN_AND_THEN, expr.span, msg, "try", sugg, applicability);
+    span_lint_and_sugg(
+        cx,
+        RETURN_AND_THEN,
+        expr.span,
+        "use the `?` operator instead of an `and_then` call",
+        "try",
+        sugg,
+        applicability,
+    );
 }

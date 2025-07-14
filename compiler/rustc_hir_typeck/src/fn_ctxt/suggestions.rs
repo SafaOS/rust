@@ -23,7 +23,7 @@ use rustc_middle::ty::{
 };
 use rustc_session::errors::ExprParenthesesNeeded;
 use rustc_span::source_map::Spanned;
-use rustc_span::{Ident, Span, Symbol, sym};
+use rustc_span::{ExpnKind, Ident, MacroKind, Span, Symbol, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::error_reporting::traits::DefIdOrName;
 use rustc_trait_selection::infer::InferCtxtExt;
@@ -308,7 +308,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 };
                 let mut tuple_indexes = Vec::new();
                 let mut expr_id = expr.hir_id;
-                for (parent_id, node) in self.tcx.hir().parent_iter(expr.hir_id) {
+                for (parent_id, node) in self.tcx.hir_parent_iter(expr.hir_id) {
                     match node {
                         Node::Expr(&Expr { kind: ExprKind::Tup(subs), .. }) => {
                             tuple_indexes.push(
@@ -351,7 +351,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         if self.suggest_fn_call(err, expr, found, |output| self.may_coerce(output, expected))
             && let ty::FnDef(def_id, ..) = *found.kind()
-            && let Some(sp) = self.tcx.hir().span_if_local(def_id)
+            && let Some(sp) = self.tcx.hir_span_if_local(def_id)
         {
             let name = self.tcx.item_name(def_id);
             let kind = self.tcx.def_kind(def_id);
@@ -381,9 +381,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             let mut suggestions = methods
                 .iter()
                 .filter_map(|conversion_method| {
+                    let conversion_method_name = conversion_method.name();
                     let receiver_method_ident = expr.method_ident();
                     if let Some(method_ident) = receiver_method_ident
-                        && method_ident.name == conversion_method.name
+                        && method_ident.name == conversion_method_name
                     {
                         return None; // do not suggest code that is already there (#53348)
                     }
@@ -391,23 +392,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     let method_call_list = [sym::to_vec, sym::to_string];
                     let mut sugg = if let ExprKind::MethodCall(receiver_method, ..) = expr.kind
                         && receiver_method.ident.name == sym::clone
-                        && method_call_list.contains(&conversion_method.name)
+                        && method_call_list.contains(&conversion_method_name)
                     // If receiver is `.clone()` and found type has one of those methods,
                     // we guess that the user wants to convert from a slice type (`&[]` or `&str`)
                     // to an owned type (`Vec` or `String`). These conversions clone internally,
                     // so we remove the user's `clone` call.
                     {
-                        vec![(receiver_method.ident.span, conversion_method.name.to_string())]
+                        vec![(receiver_method.ident.span, conversion_method_name.to_string())]
                     } else if expr.precedence() < ExprPrecedence::Unambiguous {
                         vec![
                             (expr.span.shrink_to_lo(), "(".to_string()),
-                            (expr.span.shrink_to_hi(), format!(").{}()", conversion_method.name)),
+                            (expr.span.shrink_to_hi(), format!(").{}()", conversion_method_name)),
                         ]
                     } else {
-                        vec![(expr.span.shrink_to_hi(), format!(".{}()", conversion_method.name))]
+                        vec![(expr.span.shrink_to_hi(), format!(".{}()", conversion_method_name))]
                     };
                     let struct_pat_shorthand_field =
-                        self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr);
+                        self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr);
                     if let Some(name) = struct_pat_shorthand_field {
                         sugg.insert(0, (expr.span.shrink_to_lo(), format!("{name}: ")));
                     }
@@ -449,7 +450,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             });
 
             let prefix_wrap = |sugg: &str| {
-                if let Some(name) = self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+                if let Some(name) = self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
                     format!(": {}{}", name, sugg)
                 } else {
                     sugg.to_string()
@@ -565,7 +566,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         found: Ty<'tcx>,
     ) -> bool {
         // Do not suggest `Box::new` in const context.
-        if self.tcx.hir().is_inside_const_context(hir_id) || !expected.is_box() || found.is_box() {
+        if self.tcx.hir_is_inside_const_context(hir_id) || !expected.is_box() || found.is_box() {
             return false;
         }
         if self.may_coerce(Ty::new_box(self.tcx, found), expected) {
@@ -613,7 +614,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     .iter()
                     .take(4)
                     .map(|(var_hir_id, upvar)| {
-                        let var_name = self.tcx.hir().name(*var_hir_id).to_string();
+                        let var_name = self.tcx.hir_name(*var_hir_id).to_string();
                         let msg = format!("`{var_name}` captured here");
                         (upvar.span, msg)
                     })
@@ -645,7 +646,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     ) -> bool {
         // Handle #68197.
 
-        if self.tcx.hir().is_inside_const_context(expr.hir_id) {
+        if self.tcx.hir_is_inside_const_context(expr.hir_id) {
             // Do not suggest `Box::new` in const context.
             return false;
         }
@@ -671,7 +672,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         }
                         _ => {
                             let prefix = if let Some(name) =
-                                self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr)
+                                self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr)
                             {
                                 format!("{}: ", name)
                             } else {
@@ -904,7 +905,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// Assumes given function doesn't have a explicit return type.
     fn can_add_return_type(&self, fn_id: LocalDefId) -> bool {
         match self.tcx.hir_node_by_def_id(fn_id) {
-            Node::Item(&hir::Item { ident, .. }) => {
+            Node::Item(item) => {
+                let (ident, _, _, _) = item.expect_fn();
                 // This is less than ideal, it will not suggest a return type span on any
                 // method called `main`, regardless of whether it is actually the entry point,
                 // but it will still present it as the reason for the expected type.
@@ -1084,8 +1086,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let in_loop = self.is_loop(id)
             || self
                 .tcx
-                .hir()
-                .parent_iter(id)
+                .hir_parent_iter(id)
                 .take_while(|(_, node)| {
                     // look at parents until we find the first body owner
                     node.body_id().is_none()
@@ -1095,8 +1096,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let in_local_statement = self.is_local_statement(id)
             || self
                 .tcx
-                .hir()
-                .parent_iter(id)
+                .hir_parent_iter(id)
                 .any(|(parent_id, _)| self.is_local_statement(parent_id));
 
         if in_loop && in_local_statement {
@@ -1111,7 +1111,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             return;
         }
 
-        let scope = self.tcx.hir().parent_iter(id).find(|(_, node)| {
+        let scope = self.tcx.hir_parent_iter(id).find(|(_, node)| {
             matches!(
                 node,
                 Node::Expr(Expr { kind: ExprKind::Closure(..), .. })
@@ -1154,7 +1154,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
         if can_return
             && let Some(span) = expr.span.find_ancestor_inside(
-                self.tcx.hir().span_with_body(self.tcx.local_def_id_to_hir_id(fn_id)),
+                self.tcx.hir_span_with_body(self.tcx.local_def_id_to_hir_id(fn_id)),
             )
         {
             // When the expr is in a match arm's body, we shouldn't add semicolon ';' at the end.
@@ -1168,7 +1168,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // -------------^^^^^^^-
             // Don't add semicolon `;` at the end of `dbg!(x)` expr
             fn is_in_arm<'tcx>(expr: &'tcx hir::Expr<'tcx>, tcx: TyCtxt<'tcx>) -> bool {
-                for (_, node) in tcx.hir().parent_iter(expr.hir_id) {
+                for (_, node) in tcx.hir_parent_iter(expr.hir_id) {
                     match node {
                         hir::Node::Block(block) => {
                             if let Some(ret) = block.expr
@@ -1276,7 +1276,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 )
                 .must_apply_modulo_regions()
         {
-            let suggestion = match self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+            let suggestion = match self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
                 Some(ident) => format!(": {ident}.clone()"),
                 None => ".clone()".to_string(),
             };
@@ -1367,6 +1367,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 self.param_env,
                 ty::TraitRef::new(self.tcx, into_def_id, [expr_ty, expected_ty]),
             ))
+            && !expr
+                .span
+                .macro_backtrace()
+                .any(|x| matches!(x.kind, ExpnKind::Macro(MacroKind::Attr | MacroKind::Derive, ..)))
         {
             let span = expr.span.find_oldest_ancestor_in_same_ctxt();
 
@@ -1378,14 +1382,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     (span.shrink_to_hi(), ").into()".to_owned()),
                 ]
             };
-            if let Some(name) = self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+            if let Some(name) = self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
                 sugg.insert(0, (expr.span.shrink_to_lo(), format!("{}: ", name)));
             }
             diag.multipart_suggestion(
-                format!("call `Into::into` on this expression to convert `{expr_ty}` into `{expected_ty}`"),
-                sugg,
-                Applicability::MaybeIncorrect
-            );
+                    format!("call `Into::into` on this expression to convert `{expr_ty}` into `{expected_ty}`"),
+                    sugg,
+                    Applicability::MaybeIncorrect
+                );
             return true;
         }
 
@@ -1411,8 +1415,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             return false;
         }
 
-        let hir = self.tcx.hir();
-        let cond_parent = hir.parent_iter(expr.hir_id).find(|(_, node)| {
+        let cond_parent = self.tcx.hir_parent_iter(expr.hir_id).find(|(_, node)| {
             !matches!(node, hir::Node::Expr(hir::Expr { kind: hir::ExprKind::Binary(op, _, _), .. }) if op.node == hir::BinOpKind::And)
         });
         // Don't suggest:
@@ -1434,7 +1437,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             return false;
         }
 
-        let suggestion = match self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+        let suggestion = match self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
             Some(ident) => format!(": {ident}.is_some()"),
             None => ".is_some()".to_string(),
         };
@@ -1531,30 +1534,29 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             if self.may_coerce(blk_ty, *elem_ty)
                 && blk.stmts.is_empty()
                 && blk.rules == hir::BlockCheckMode::DefaultBlock
+                && let source_map = self.tcx.sess.source_map()
+                && let Ok(snippet) = source_map.span_to_snippet(blk.span)
+                && snippet.starts_with('{')
+                && snippet.ends_with('}')
             {
-                let source_map = self.tcx.sess.source_map();
-                if let Ok(snippet) = source_map.span_to_snippet(blk.span) {
-                    if snippet.starts_with('{') && snippet.ends_with('}') {
-                        diag.multipart_suggestion_verbose(
-                            "to create an array, use square brackets instead of curly braces",
-                            vec![
-                                (
-                                    blk.span
-                                        .shrink_to_lo()
-                                        .with_hi(rustc_span::BytePos(blk.span.lo().0 + 1)),
-                                    "[".to_string(),
-                                ),
-                                (
-                                    blk.span
-                                        .shrink_to_hi()
-                                        .with_lo(rustc_span::BytePos(blk.span.hi().0 - 1)),
-                                    "]".to_string(),
-                                ),
-                            ],
-                            Applicability::MachineApplicable,
-                        );
-                    }
-                }
+                diag.multipart_suggestion_verbose(
+                    "to create an array, use square brackets instead of curly braces",
+                    vec![
+                        (
+                            blk.span
+                                .shrink_to_lo()
+                                .with_hi(rustc_span::BytePos(blk.span.lo().0 + 1)),
+                            "[".to_string(),
+                        ),
+                        (
+                            blk.span
+                                .shrink_to_hi()
+                                .with_lo(rustc_span::BytePos(blk.span.hi().0 - 1)),
+                            "]".to_string(),
+                        ),
+                    ],
+                    Applicability::MachineApplicable,
+                );
             }
         }
     }
@@ -1811,9 +1813,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     "`{expected_ty}` does not implement `Clone`, so `{found_ty}` was cloned instead"
                 ),
             );
-            let owner = self.tcx.hir().enclosing_body_owner(expr.hir_id);
+            let owner = self.tcx.hir_enclosing_body_owner(expr.hir_id);
             if let ty::Param(param) = expected_ty.kind()
-                && let Some(generics) = self.tcx.hir().get_generics(owner)
+                && let Some(generics) = self.tcx.hir_get_generics(owner)
             {
                 suggest_constraining_type_params(
                     self.tcx,
@@ -1933,7 +1935,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         ..
                     } = init
                 {
-                    let hir::Body { value: body_expr, .. } = self.tcx.hir().body(*body_id);
+                    let hir::Body { value: body_expr, .. } = self.tcx.hir_body(*body_id);
                     self.note_type_is_not_clone_inner_expr(body_expr)
                 } else {
                     expr
@@ -2031,7 +2033,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             )
         };
 
-        let sugg = match self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+        let sugg = match self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
             Some(ident) => format!(": {ident}{sugg}"),
             None => sugg.to_string(),
         };
@@ -2048,11 +2050,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected: Ty<'tcx>,
         found: Ty<'tcx>,
     ) -> bool {
-        let map = self.tcx.hir();
         let returned = matches!(
             self.tcx.parent_hir_node(expr.hir_id),
             hir::Node::Expr(hir::Expr { kind: hir::ExprKind::Ret(_), .. })
-        ) || map.get_fn_id_for_return_block(expr.hir_id).is_some();
+        ) || self.tcx.hir_get_fn_id_for_return_block(expr.hir_id).is_some();
         if returned
             && let ty::Adt(e, args_e) = expected.kind()
             && let ty::Adt(f, args_f) = found.kind()
@@ -2094,9 +2095,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expr: &hir::Expr<'tcx>,
         expected: Ty<'tcx>,
     ) -> bool {
-        let hir = self.tcx.hir();
+        let tcx = self.tcx;
         let enclosing_scope =
-            hir.get_enclosing_scope(expr.hir_id).map(|hir_id| self.tcx.hir_node(hir_id));
+            tcx.hir_get_enclosing_scope(expr.hir_id).map(|hir_id| tcx.hir_node(hir_id));
 
         // Get tail expr of the enclosing block or body
         let tail_expr = if let Some(Node::Block(hir::Block { expr, .. })) = enclosing_scope
@@ -2104,8 +2105,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         {
             *expr
         } else {
-            let body_def_id = hir.enclosing_body_owner(expr.hir_id);
-            let body = hir.body_owned_by(body_def_id);
+            let body_def_id = tcx.hir_enclosing_body_owner(expr.hir_id);
+            let body = tcx.hir_body_owned_by(body_def_id);
 
             // Get tail expr of the body
             match body.value.kind {
@@ -2147,7 +2148,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 ("consider returning a value here", format!("`{expected}` value"))
             };
 
-            let src_map = self.tcx.sess.source_map();
+            let src_map = tcx.sess.source_map();
             let suggestion = if src_map.is_multiline(expr.span) {
                 let indentation = src_map.indentation_before(span).unwrap_or_else(String::new);
                 format!("\n{indentation}/* {suggestion} */")
@@ -2289,7 +2290,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // Unroll desugaring, to make sure this works for `for` loops etc.
                 loop {
                     parent = self.tcx.parent_hir_id(id);
-                    let parent_span = self.tcx.hir().span(parent);
+                    let parent_span = self.tcx.hir_span(parent);
                     if parent_span.find_ancestor_inside(expr.span).is_some() {
                         // The parent node is part of the same span, so is the result of the
                         // same expansion/desugaring and not the 'real' parent node.
@@ -2378,7 +2379,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 .collect();
 
             let suggestions_for = |variant: &_, ctor_kind, field_name| {
-                let prefix = match self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+                let prefix = match self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
                     Some(ident) => format!("{ident}: "),
                     None => String::new(),
                 };
@@ -2700,8 +2701,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         ));
                     }
 
-                    let prefix = match self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr)
-                    {
+                    let prefix = match self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
                         Some(ident) => format!("{ident}: "),
                         None => String::new(),
                     };
@@ -2911,7 +2911,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         };
 
                         let prefix =
-                            match self.tcx.hir().maybe_get_struct_pattern_shorthand_field(expr) {
+                            match self.tcx.hir_maybe_get_struct_pattern_shorthand_field(expr) {
                                 Some(ident) => format!("{ident}: "),
                                 None => String::new(),
                             };
@@ -2983,7 +2983,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             return false;
         }
 
-        let Ok(src) = self.tcx.sess.source_map().span_to_snippet(expr.span) else {
+        let span = if let hir::ExprKind::Lit(lit) = &expr.kind { lit.span } else { expr.span };
+        let Ok(src) = self.tcx.sess.source_map().span_to_snippet(span) else {
             return false;
         };
 
@@ -3078,10 +3079,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // Remove fractional part from literal, for example `42.0f32` into `42`
                 let src = src.trim_end_matches(&checked_ty.to_string());
                 let len = src.split('.').next().unwrap().len();
-                expr.span.with_lo(expr.span.lo() + BytePos(len as u32))
+                span.with_lo(span.lo() + BytePos(len as u32))
             } else {
                 let len = src.trim_end_matches(&checked_ty.to_string()).len();
-                expr.span.with_lo(expr.span.lo() + BytePos(len as u32))
+                span.with_lo(span.lo() + BytePos(len as u32))
             },
             if expr.precedence() < ExprPrecedence::Unambiguous {
                 // Readd `)`
@@ -3097,7 +3098,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             |expr: &hir::Expr<'_>| matches!(expr.kind, hir::ExprKind::Unary(hir::UnOp::Neg, ..));
         let is_uint = |ty: Ty<'_>| matches!(ty.kind(), ty::Uint(..));
 
-        let in_const_context = self.tcx.hir().is_inside_const_context(expr.hir_id);
+        let in_const_context = self.tcx.hir_is_inside_const_context(expr.hir_id);
 
         let suggest_fallible_into_or_lhs_from =
             |err: &mut Diag<'_>, exp_to_found_is_fallible: bool| {
@@ -3141,7 +3142,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         let suggest_to_change_suffix_or_into =
             |err: &mut Diag<'_>, found_to_exp_is_fallible: bool, exp_to_found_is_fallible: bool| {
-                let exp_is_lhs = expected_ty_expr.is_some_and(|e| self.tcx.hir().is_lhs(e.hir_id));
+                let exp_is_lhs = expected_ty_expr.is_some_and(|e| self.tcx.hir_is_lhs(e.hir_id));
 
                 if exp_is_lhs {
                     return;
@@ -3477,30 +3478,24 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         lhs_ty: Ty<'tcx>,
         rhs_expr: &'tcx hir::Expr<'tcx>,
         lhs_expr: &'tcx hir::Expr<'tcx>,
-        op: hir::BinOp,
     ) {
-        match op.node {
-            hir::BinOpKind::Eq => {
-                if let Some(partial_eq_def_id) = self.infcx.tcx.lang_items().eq_trait()
-                    && self
-                        .infcx
-                        .type_implements_trait(partial_eq_def_id, [rhs_ty, lhs_ty], self.param_env)
-                        .must_apply_modulo_regions()
-                {
-                    let sm = self.tcx.sess.source_map();
-                    if let Ok(rhs_snippet) = sm.span_to_snippet(rhs_expr.span)
-                        && let Ok(lhs_snippet) = sm.span_to_snippet(lhs_expr.span)
-                    {
-                        err.note(format!("`{rhs_ty}` implements `PartialEq<{lhs_ty}>`"));
-                        err.multipart_suggestion(
-                            "consider swapping the equality",
-                            vec![(lhs_expr.span, rhs_snippet), (rhs_expr.span, lhs_snippet)],
-                            Applicability::MaybeIncorrect,
-                        );
-                    }
-                }
+        if let Some(partial_eq_def_id) = self.infcx.tcx.lang_items().eq_trait()
+            && self
+                .infcx
+                .type_implements_trait(partial_eq_def_id, [rhs_ty, lhs_ty], self.param_env)
+                .must_apply_modulo_regions()
+        {
+            let sm = self.tcx.sess.source_map();
+            if let Ok(rhs_snippet) = sm.span_to_snippet(rhs_expr.span)
+                && let Ok(lhs_snippet) = sm.span_to_snippet(lhs_expr.span)
+            {
+                err.note(format!("`{rhs_ty}` implements `PartialEq<{lhs_ty}>`"));
+                err.multipart_suggestion(
+                    "consider swapping the equality",
+                    vec![(lhs_expr.span, rhs_snippet), (rhs_expr.span, lhs_snippet)],
+                    Applicability::MaybeIncorrect,
+                );
             }
-            _ => {}
         }
     }
 }
