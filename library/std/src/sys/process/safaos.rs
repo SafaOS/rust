@@ -387,7 +387,8 @@ impl Process {
     }
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        todo!("try_wait is not yet implemented for SafaOS, use wait instead")
+        let exit_code = syscalls::process::try_cleanup(self.0)?;
+        Ok(exit_code.map(|code| ExitStatus(code as u32)))
     }
 }
 
