@@ -1,3 +1,4 @@
+use super::env::{CommandEnv, CommandEnvs};
 pub use crate::ffi::OsString as EnvKey;
 use crate::ffi::{OsStr, OsString};
 use crate::num::NonZero;
@@ -6,12 +7,11 @@ use crate::os::safaos::api::syscalls;
 use crate::path::Path;
 use crate::sys::fs::File;
 use crate::sys::pipe::AnonPipe;
-use crate::sys_common::process::{CommandEnv, CommandEnvs};
 use crate::{fmt, io};
 use safa_api::errors::SysResult;
 use safa_api::process::stdio::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
 
-use super::resources::FileDesc;
+use crate::sys::pal::resources::FileDesc;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Command
@@ -193,6 +193,10 @@ impl Command {
         }
         Ok((status, stdout, stderr))
     }
+}
+
+pub fn output(cmd: &mut Command) -> crate::io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
+    Command::output(cmd)
 }
 
 impl From<AnonPipe> for Stdio {

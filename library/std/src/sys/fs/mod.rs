@@ -24,7 +24,11 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_os = "hermit")] {
         mod hermit;
         use hermit as imp;
-    } else if #[cfg(target_os = "solid_asp3")] {
+    } else if #[cfg(target_os = "safaos")] {
+        mod safaos;
+        use safaos as imp;
+    }
+    else if #[cfg(target_os = "solid_asp3")] {
         mod solid;
         use solid as imp;
     } else if #[cfg(target_os = "uefi")] {

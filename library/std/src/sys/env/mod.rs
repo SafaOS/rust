@@ -38,6 +38,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_os = "xous")] {
         mod xous;
         pub use xous::*;
+    } else if #[cfg(target_os = "safaos")] {
+        mod safaos;
+        pub use safaos::*;
     } else if #[cfg(target_os = "zkvm")] {
         mod zkvm;
         pub use zkvm::*;

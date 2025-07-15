@@ -111,6 +111,10 @@ unsafe impl Send for FileDesc {}
 unsafe impl Sync for FileDesc {}
 
 impl FileDesc {
+    pub fn tell(&self) -> u64 {
+        unsafe { *self.seek_at.get() as u64 }
+    }
+
     /// converts a raw resource id into a FileDesc
     /// this is unsafe because the resource id is not checked for validity
     pub unsafe fn from_raw(ri: usize) -> Self {

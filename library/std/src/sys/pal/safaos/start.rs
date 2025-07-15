@@ -2,7 +2,7 @@ use safa_api::raw::processes::AbiStructures;
 use safa_api::raw::{NonNullSlice, RawSliceMut};
 use safa_api::syscalls::exit;
 
-extern "C" {
+unsafe extern "C" {
     fn main() -> u16;
 }
 
@@ -23,7 +23,7 @@ unsafe fn _start_inner(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(unused)]
 pub extern "C" fn _start(
     argc: usize,

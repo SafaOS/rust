@@ -1,15 +1,10 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod alloc;
-pub mod args;
-pub mod env;
-pub mod fs;
 pub mod os;
 pub mod pipe;
-pub mod process;
 pub mod resources;
 pub mod start;
-pub mod stdio;
 pub mod thread;
 pub mod time;
 

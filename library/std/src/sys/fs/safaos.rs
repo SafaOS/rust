@@ -6,12 +6,13 @@ use crate::io::{Read, Seek, Write};
 use crate::path::{Path, PathBuf};
 use crate::sys::resources::{DirIterResource, FileDesc, FileResource};
 use crate::sys::time::SystemTime;
-use crate::sys::unsupported;
+use crate::sys::{unsupported, unsupported_err};
 use safa_api::errors::ErrorStatus;
 use safa_api::raw;
 use safa_api::syscalls;
 
-use super::resources::path_to_str;
+use crate::fs::TryLockError;
+use crate::sys::pal::resources::path_to_str;
 
 #[derive(Debug)]
 pub struct File(FileDesc);
@@ -265,12 +266,12 @@ impl File {
         unsupported()
     }
 
-    pub fn try_lock(&self) -> io::Result<bool> {
-        unsupported()
+    pub fn try_lock(&self) -> Result<(), TryLockError> {
+        Err(TryLockError::Error(unsupported_err()))
     }
 
-    pub fn try_lock_shared(&self) -> io::Result<bool> {
-        unsupported()
+    pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
+        Err(TryLockError::Error(unsupported_err()))
     }
 
     pub fn unlock(&self) -> io::Result<()> {
@@ -315,6 +316,10 @@ impl File {
 
     pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
         (&mut &self.0).seek(pos)
+    }
+
+    pub fn tell(&self) -> io::Result<u64> {
+        Ok(self.0.tell())
     }
 
     pub fn duplicate(&self) -> io::Result<File> {

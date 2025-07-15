@@ -8,7 +8,12 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_os = "uefi")] {
         mod uefi;
         use uefi as imp;
-    } else {
+    }
+    else if #[cfg(target_os = "safaos")] {
+        mod safaos;
+        use safaos as imp;
+    }
+    else {
         mod unsupported;
         use unsupported as imp;
     }
