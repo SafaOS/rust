@@ -2,7 +2,6 @@ use super::resources::path_to_str;
 use super::unsupported;
 use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
-use crate::marker::PhantomData;
 use crate::os::safaos::api::errors::ErrorStatus;
 use crate::os::safaos::api::syscalls;
 use crate::path::{self, PathBuf};
@@ -39,28 +38,40 @@ pub fn chdir(path: &path::Path) -> io::Result<()> {
     Ok(())
 }
 
-pub struct SplitPaths<'a>(!, PhantomData<&'a ()>);
+const PATH_SEPARATOR: char = ';';
 
-pub fn split_paths(_unparsed: &OsStr) -> SplitPaths<'_> {
-    panic!("unsupported")
+pub struct SplitPaths<'a>(core::str::Split<'a, char>);
+
+pub fn split_paths(unparsed: &OsStr) -> SplitPaths<'_> {
+    SplitPaths(
+        unparsed.to_str().expect("invalid utf-8 while splitting paths").split(PATH_SEPARATOR),
+    )
 }
 
 impl<'a> Iterator for SplitPaths<'a> {
     type Item = PathBuf;
     fn next(&mut self) -> Option<PathBuf> {
-        self.0
+        self.0.next().map(PathBuf::from)
     }
 }
 
 #[derive(Debug)]
 pub struct JoinPathsError;
 
-pub fn join_paths<I, T>(_paths: I) -> Result<OsString, JoinPathsError>
+pub fn join_paths<I, T>(paths: I) -> Result<OsString, JoinPathsError>
 where
     I: Iterator<Item = T>,
     T: AsRef<OsStr>,
 {
-    Err(JoinPathsError)
+    let mut new_string = String::new();
+    for t in paths {
+        let t = t.as_ref();
+        if !new_string.is_empty() {
+            new_string.push(PATH_SEPARATOR);
+        }
+        new_string.push_str(t.to_str().expect("invalid utf-8 while joining paths"));
+    }
+    Ok(OsString::from(new_string))
 }
 
 impl fmt::Display for JoinPathsError {

@@ -441,7 +441,7 @@ pub fn lstat(p: &Path) -> io::Result<FileAttr> {
     stat(p)
 }
 
-pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
+pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
     unsupported()
 }
 
