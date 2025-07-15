@@ -27,7 +27,7 @@ pub fn error_string(errno: i32) -> String {
 }
 
 pub fn getcwd() -> io::Result<PathBuf> {
-    let cwd = syscalls::getcwd()?;
+    let cwd = syscalls::process_misc::getcwd()?;
     let path = unsafe { OsString::from_encoded_bytes_unchecked(cwd.into_bytes()) };
     let path = PathBuf::from(path);
     Ok(path)
@@ -35,7 +35,7 @@ pub fn getcwd() -> io::Result<PathBuf> {
 
 pub fn chdir(path: &path::Path) -> io::Result<()> {
     let path = path_to_str!(path);
-    syscalls::chdir(path)?;
+    syscalls::process_misc::chdir(path)?;
     Ok(())
 }
 
@@ -89,7 +89,7 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn exit(code: i32) -> ! {
-    syscalls::exit(code as usize)
+    syscalls::process::exit(code as usize)
 }
 
 #[unsafe(no_mangle)]

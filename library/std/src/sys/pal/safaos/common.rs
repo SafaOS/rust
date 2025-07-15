@@ -36,5 +36,5 @@ pub fn decode_error_kind(code: i32) -> crate::io::ErrorKind {
 }
 
 pub fn abort_internal() -> ! {
-    syscalls::exit(1)
+    syscalls::process::exit(1)
 }

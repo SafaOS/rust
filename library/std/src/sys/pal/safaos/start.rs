@@ -1,6 +1,6 @@
 use safa_api::raw::processes::AbiStructures;
 use safa_api::raw::{NonNullSlice, RawSliceMut};
-use safa_api::syscalls::exit;
+use safa_api::syscalls;
 
 unsafe extern "C" {
     fn main() -> u16;
@@ -19,7 +19,7 @@ unsafe fn _start_inner(
         safa_api::process::init::sysapi_init(args, env, *task_abi_structures);
         let results = main();
 
-        exit(results as usize);
+        syscalls::process::exit(results as usize);
     }
 }
 

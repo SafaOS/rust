@@ -76,12 +76,12 @@ pub enum FileType {
     Device,
 }
 
-impl From<raw::io::InodeType> for FileType {
-    fn from(value: raw::io::InodeType) -> Self {
+impl From<raw::io::FSObjectType> for FileType {
+    fn from(value: raw::io::FSObjectType) -> Self {
         match value {
-            raw::io::InodeType::Directory => Self::Directory,
-            raw::io::InodeType::File => Self::File,
-            raw::io::InodeType::Device => Self::Device,
+            raw::io::FSObjectType::Directory => Self::Directory,
+            raw::io::FSObjectType::File => Self::File,
+            raw::io::FSObjectType::Device => Self::Device,
         }
     }
 }
@@ -233,10 +233,11 @@ impl File {
         let truncate = opts.truncate && opts.write;
 
         let path = path_to_str!(path);
-        let fd = match FileDesc::open(path, append, truncate) {
-            Err(ErrorStatus::NoSuchAFileOrDirectory) if opts.create || opts.create_new => {
-                syscalls::create(path)?;
-                FileDesc::open(path, append, truncate)?
+        let open_f = || FileDesc::open(path, opts.write, opts.read, append, opts.create, truncate);
+        let fd = match open_f() {
+            Err(ErrorStatus::NoSuchAFileOrDirectory) if opts.create_new => {
+                syscalls::fs::create(path)?;
+                open_f()?
             }
             Err(other) => return Err(other.into()),
             Ok(_) if opts.create_new => return Err(ErrorStatus::AlreadyExists.into()),
@@ -341,7 +342,7 @@ impl DirBuilder {
     }
 
     pub fn mkdir(&self, p: &Path) -> io::Result<()> {
-        Ok(syscalls::createdir(path_to_str!(p))?)
+        Ok(syscalls::fs::createdir(path_to_str!(p))?)
     }
 }
 
@@ -374,7 +375,7 @@ pub fn remove_dir_all(_path: &Path) -> io::Result<()> {
 pub fn exists(path: &Path) -> io::Result<bool> {
     let path = path_to_str!(path);
     // fastest syscall to verify the existence of a path
-    match syscalls::getdirentry(path) {
+    match syscalls::fs::getdirentry(path) {
         Err(ErrorStatus::NoSuchAFileOrDirectory) => Ok(false),
         Err(other) => Err(other.into()),
         Ok(_) => Ok(true),
@@ -395,7 +396,7 @@ pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
 
 pub fn stat(p: &Path) -> io::Result<FileAttr> {
     let path = path_to_str!(p);
-    let fd = FileResource::open(path)?;
+    let fd = FileResource::open(path, raw::io::OpenOptions::READ)?;
     Ok(fd.attrs()?)
 }
 

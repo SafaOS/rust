@@ -4,6 +4,7 @@ use core::mem::ManuallyDrop;
 use crate::io::{self, SeekFrom};
 use crate::sys::fs::FileAttr;
 use safa_api::raw;
+use safa_api::raw::io::OpenOptions;
 use safa_api::{errors::ErrorStatus, syscalls};
 
 macro_rules! path_to_str {
@@ -19,38 +20,38 @@ pub type ResourceID = usize;
 pub(crate) struct FileResource(ResourceID);
 
 impl FileResource {
-    pub(crate) fn open(path: &str) -> Result<Self, ErrorStatus> {
-        Ok(Self(syscalls::open(path)?))
+    pub(crate) fn open(path: &str, options: OpenOptions) -> Result<Self, ErrorStatus> {
+        Ok(Self(syscalls::fs::open(path, options)?))
     }
 
     pub fn attrs(&self) -> Result<FileAttr, ErrorStatus> {
-        let attr = syscalls::fattrs(self.0)?;
+        let attr = syscalls::io::fattrs(self.0)?;
         Ok(attr.into())
     }
 
     pub fn diriter_open(&self) -> Result<DirIterResource, ErrorStatus> {
-        let ri = syscalls::diriter_open(self.0)?;
+        let ri = syscalls::io::diriter_open(self.0)?;
         Ok(DirIterResource(ri))
     }
 
     pub fn truncate(&self, len: usize) -> Result<(), ErrorStatus> {
-        syscalls::truncate(self.0, len)
+        syscalls::io::truncate(self.0, len)
     }
 
     pub fn sync(&self) -> Result<(), ErrorStatus> {
-        syscalls::sync(self.0)
+        syscalls::io::sync(self.0)
     }
 
     fn read(&self, offset: isize, buf: &mut [u8]) -> Result<usize, ErrorStatus> {
-        syscalls::read(self.0, offset, buf)
+        syscalls::io::read(self.0, offset, buf)
     }
 
     fn write(&self, offset: isize, buf: &[u8]) -> Result<usize, ErrorStatus> {
-        syscalls::write(self.0, offset, buf)
+        syscalls::io::write(self.0, offset, buf)
     }
 
     fn size(&self) -> usize {
-        syscalls::fsize(self.0).unwrap()
+        syscalls::io::fsize(self.0).unwrap()
     }
 }
 
@@ -59,32 +60,32 @@ pub(crate) struct DirIterResource(ResourceID);
 
 impl DirIterResource {
     pub(crate) fn open(path: &str) -> Result<Self, ErrorStatus> {
-        let file = FileResource::open(path)?;
+        let file = FileResource::open(path, raw::io::OpenOptions::READ)?;
         file.diriter_open()
     }
 
     pub(crate) fn next(&mut self) -> Option<raw::io::DirEntry> {
         // should never error expect if there is no more entries it returns ErrorStatus::Generic
-        let raw = syscalls::diriter_next(self.0).ok()?;
+        let raw = syscalls::io::diriter_next(self.0).ok()?;
         if raw == unsafe { core::mem::zeroed() } { None } else { Some(raw) }
     }
 }
 
 impl Drop for DirIterResource {
     fn drop(&mut self) {
-        syscalls::diriter_close(self.0).unwrap()
+        syscalls::resources::destroy_resource(self.0).unwrap()
     }
 }
 
 impl Drop for FileResource {
     fn drop(&mut self) {
-        syscalls::close(self.0).unwrap()
+        syscalls::resources::destroy_resource(self.0).unwrap()
     }
 }
 
 impl Clone for FileResource {
     fn clone(&self) -> Self {
-        Self(syscalls::dup(self.0).unwrap())
+        Self(syscalls::resources::dup(self.0).unwrap())
     }
 }
 
@@ -137,8 +138,34 @@ impl FileDesc {
         &self.fd
     }
 
-    pub fn open(path: &str, append: bool, truncate: bool) -> Result<Self, ErrorStatus> {
-        let fd = FileResource::open(path)?;
+    pub fn open(
+        path: &str,
+        write: bool,
+        read: bool,
+        append: bool,
+        create: bool,
+        truncate: bool,
+    ) -> Result<Self, ErrorStatus> {
+        use raw::io::OpenOptions as RawOpenOptions;
+
+        let mut options = RawOpenOptions::from_bits(0);
+        if write {
+            options = options | RawOpenOptions::WRITE;
+        }
+
+        if read {
+            options = options | RawOpenOptions::READ;
+        }
+
+        if truncate {
+            options = options | RawOpenOptions::WRITE_TRUNCATE;
+        }
+
+        if create {
+            options = options | RawOpenOptions::CREATE_FILE;
+        }
+
+        let fd = FileResource::open(path, options)?;
         let seek_at = if append { -1 } else { 0 };
         if truncate {
             fd.truncate(0)?;

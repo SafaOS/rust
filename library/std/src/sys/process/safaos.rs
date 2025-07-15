@@ -9,7 +9,7 @@ use crate::sys::fs::File;
 use crate::sys::pipe::AnonPipe;
 use crate::{fmt, io};
 use safa_api::errors::SysResult;
-use safa_api::process::stdio::{sysmeta_stderr, sysmeta_stdin, sysmeta_stdout};
+use safa_api::process::stdio::{sysget_stderr, sysget_stdin, sysget_stdout};
 
 use crate::sys::pal::resources::FileDesc;
 
@@ -53,9 +53,9 @@ impl Stdio {
     fn into_raw(&self) -> Option<usize> {
         match self {
             Stdio::Inherit => None,
-            Stdio::InheritStdout => Some(sysmeta_stdout()),
-            Stdio::InheritStderr => Some(sysmeta_stderr()),
-            Stdio::InheritStdin => Some(sysmeta_stdin()),
+            Stdio::InheritStdout => Some(sysget_stdout()),
+            Stdio::InheritStderr => Some(sysget_stderr()),
+            Stdio::InheritStdin => Some(sysget_stdin()),
             Stdio::Null => todo!(),
             Stdio::InheritFile(f) => Some(f.fd()),
             s => unimplemented!("stdio: {:?}", s),
@@ -66,13 +66,13 @@ impl Stdio {
         match self {
             Stdio::Inherit => None,
             Stdio::InheritStdout => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysmeta_stdout()) }))
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysget_stdout()) }))
             }
             Stdio::InheritStderr => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysmeta_stderr()) }))
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysget_stderr()) }))
             }
             Stdio::InheritStdin => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysmeta_stdin()) }))
+                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysget_stdin()) }))
             }
             Stdio::Null => None,
             Stdio::InheritFile(fd) => Some(AnonPipe::from_fd(fd)),
@@ -162,11 +162,12 @@ impl Command {
             self.args.iter().map(|s| unsafe { s.to_str().unwrap_unchecked() }).collect::<Vec<_>>();
         let path = name;
 
-        let pid = syscalls::pspawn(
+        let pid = syscalls::process::spawn(
             Some(name),
             path,
             argv,
             SpawnFlags::CLONE_CWD,
+            None,
             stdinn,
             stdoutn,
             stderrn,
@@ -369,11 +370,11 @@ impl From<usize> for ExitCode {
     }
 }
 
-pub struct Process(usize);
+pub struct Process(u32);
 
 impl Process {
     pub fn id(&self) -> u32 {
-        self.0 as u32
+        self.0
     }
 
     pub fn kill(&mut self) -> io::Result<()> {
@@ -381,7 +382,7 @@ impl Process {
     }
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
-        let exit_code = syscalls::wait(self.0)?;
+        let exit_code = syscalls::process::wait(self.0)?;
         Ok(ExitStatus(exit_code as u32))
     }
 
