@@ -9,6 +9,7 @@ use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, unsupported_err};
 use safa_api::errors::ErrorStatus;
 use safa_api::raw;
+use safa_api::raw::io::FSObjectType;
 use safa_api::syscalls;
 
 use crate::fs::TryLockError;
@@ -352,24 +353,59 @@ pub fn readdir(p: &Path) -> io::Result<ReadDir> {
     Ok(ReadDir { ri: diriter, path: p.to_path_buf() })
 }
 
-pub fn unlink(_p: &Path) -> io::Result<()> {
-    unsupported()
+pub fn unlink(p: &Path) -> io::Result<()> {
+    let str = path_to_str!(p);
+    let fattrs = syscalls::fs::getdirentry(str)?;
+    if fattrs.attrs.kind != FSObjectType::File {
+        return Err(ErrorStatus::NotAFile.into());
+    }
+    syscalls::fs::remove_path(str)?;
+    Ok(())
 }
 
-pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
-    unsupported()
+pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
+    let old_str = path_to_str!(old);
+    let old_attrs = syscalls::fs::getdirentry(old_str)?;
+    // TODO: implement native rename syscall
+    match old_attrs.attrs.kind {
+        FSObjectType::File => {
+            copy(old, new)?;
+            syscalls::fs::remove_path(old_str)?;
+            Ok(())
+        }
+        FSObjectType::Directory => {
+            for entry in crate::fs::read_dir(old)? {
+                let entry = entry?;
+                let old_path = entry.path();
+
+                let new_path = new.join(entry.file_name());
+                rename(&old_path, &new_path)?;
+                syscalls::fs::remove_path(path_to_str!(old_path))?;
+            }
+
+            syscalls::fs::remove_path(old_str)?;
+            Ok(())
+        }
+        _ => unsupported(),
+    }
 }
 
 pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
     match perm.0 {}
 }
 
-pub fn rmdir(_p: &Path) -> io::Result<()> {
-    unsupported()
+pub fn rmdir(p: &Path) -> io::Result<()> {
+    let path = path_to_str!(p);
+    let fattrs = syscalls::fs::getdirentry(path)?;
+    if fattrs.attrs.kind != FSObjectType::Directory {
+        return Err(ErrorStatus::NotADirectory.into());
+    }
+    syscalls::fs::remove_path(path)?;
+    Ok(())
 }
 
-pub fn remove_dir_all(_path: &Path) -> io::Result<()> {
-    unsupported()
+pub fn remove_dir_all(path: &Path) -> io::Result<()> {
+    super::common::remove_dir_all(path)
 }
 
 pub fn exists(path: &Path) -> io::Result<bool> {
@@ -405,10 +441,10 @@ pub fn lstat(p: &Path) -> io::Result<FileAttr> {
     stat(p)
 }
 
-pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
+pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
     unsupported()
 }
 
-pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
-    unsupported()
+pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
+    super::common::copy(from, to)
 }
