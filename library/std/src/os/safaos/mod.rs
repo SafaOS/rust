@@ -18,9 +18,12 @@ pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
         Busy => IoErrorKind::ResourceBusy,
         NotADirectory => IoErrorKind::NotADirectory,
         NotAFile => IoErrorKind::IsADirectory,
-        InvalidPath => IoErrorKind::InvalidInput,
-        InvalidStr => IoErrorKind::InvalidData,
+        InvalidPath | InvalidPid | InvalidTid | InvalidResource | InvalidOffset | InvalidPtr
+        | StrTooLong => IoErrorKind::InvalidInput,
+        InvalidStr | Corrupted | NotExecutable => IoErrorKind::InvalidData,
         OutOfMemory | MMapError => IoErrorKind::OutOfMemory,
-        _ => IoErrorKind::Other,
+        DirectoryNotEmpty => IoErrorKind::DirectoryNotEmpty,
+        OperationNotSupported | NotSupported | InvalidSyscall => IoErrorKind::Unsupported,
+        NotEnoughArguments | Generic => IoErrorKind::Other,
     }
 }
