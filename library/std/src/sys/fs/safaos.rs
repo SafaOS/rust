@@ -1,5 +1,4 @@
 use crate::ffi::{OsStr, OsString};
-use crate::fmt;
 use crate::hash::Hash;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, SeekFrom};
 use crate::io::{Read, Seek, Write};
@@ -7,6 +6,8 @@ use crate::path::{Path, PathBuf};
 use crate::sys::resources::{DirIterResource, FileDesc, FileResource};
 use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, unsupported_err};
+use crate::sys_common::ignore_notfound;
+use crate::{fmt, fs};
 use safa_api::errors::ErrorStatus;
 use safa_api::raw;
 use safa_api::raw::io::FSObjectType;
@@ -365,6 +366,8 @@ pub fn unlink(p: &Path) -> io::Result<()> {
 
 pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
     let old_str = path_to_str!(old);
+    let new_str = path_to_str!(new);
+
     let old_attrs = syscalls::fs::getdirentry(old_str)?;
     // TODO: implement native rename syscall
     match old_attrs.attrs.kind {
@@ -374,13 +377,25 @@ pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
             Ok(())
         }
         FSObjectType::Directory => {
+            // create the new directory if it doesn't exist
+            if let Err(e) = syscalls::fs::createdir(new_str)
+                && e != ErrorStatus::AlreadyExists
+            {
+                return Err(e.into());
+            }
+
             for entry in crate::fs::read_dir(old)? {
                 let entry = entry?;
-                let old_path = entry.path();
+                let entry_name = entry.file_name();
+                // special cases for '.' and '..' to avoid infinite recursion
+                if entry_name.as_encoded_bytes() == b"." || entry_name.as_encoded_bytes() == b".." {
+                    continue;
+                }
 
-                let new_path = new.join(entry.file_name());
-                rename(&old_path, &new_path)?;
-                syscalls::fs::remove_path(path_to_str!(old_path))?;
+                let old_entry_path = entry.path();
+
+                let new_entry_path = new.join(entry_name);
+                rename(&old_entry_path, &new_entry_path)?;
             }
 
             syscalls::fs::remove_path(old_str)?;
@@ -405,7 +420,31 @@ pub fn rmdir(p: &Path) -> io::Result<()> {
 }
 
 pub fn remove_dir_all(path: &Path) -> io::Result<()> {
-    super::common::remove_dir_all(path)
+    for child in crate::fs::read_dir(path)? {
+        let result: io::Result<()> = try {
+            let child = child?;
+            let name = child.file_name();
+            // special cases for '.' and '..' to avoid infinite recursion
+            if name.as_encoded_bytes() == b"." || name.as_encoded_bytes() == b".." {
+                continue;
+            }
+
+            let path = child.path();
+
+            if child.file_type()?.is_dir() {
+                remove_dir_all(&path)?;
+            } else {
+                fs::remove_file(&path)?;
+            }
+        };
+        // ignore internal NotFound errors to prevent race conditions
+        if let Err(err) = &result
+            && err.kind() != io::ErrorKind::NotFound
+        {
+            return result;
+        }
+    }
+    ignore_notfound(fs::remove_dir(path))
 }
 
 pub fn exists(path: &Path) -> io::Result<bool> {
@@ -446,5 +485,14 @@ pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
 }
 
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
-    super::common::copy(from, to)
+    let mut reader = fs::File::open(from)?;
+    let metadata = reader.metadata()?;
+
+    if !metadata.is_file() {
+        return Err(ErrorStatus::NotAFile.into());
+    }
+
+    let mut writer = fs::File::create(to)?;
+    let ret = io::copy(&mut reader, &mut writer)?;
+    Ok(ret)
 }
