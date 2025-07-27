@@ -7,6 +7,7 @@ use crate::os::safaos::api::syscalls;
 use crate::path::Path;
 use crate::sys::fs::File;
 use crate::sys::pipe::AnonPipe;
+use crate::sys::thread::DEFAULT_MIN_STACK_SIZE;
 use crate::{fmt, io};
 use safa_api::errors::SysResult;
 use safa_api::process::stdio::{sysget_stderr, sysget_stdin, sysget_stdout};
@@ -141,7 +142,7 @@ impl Command {
         _default: Stdio,
         _needs_stdin: bool,
     ) -> io::Result<(Process, StdioPipes)> {
-        use safa_api::raw::processes::SpawnFlags;
+        use safa_api::abi::process::SpawnFlags;
         assert_eq!(_default, Stdio::Inherit);
 
         let (stdin, stdout, stderr) = (
@@ -167,10 +168,11 @@ impl Command {
             path,
             argv,
             SpawnFlags::CLONE_CWD,
-            None,
+            safa_api::abi::process::RawContextPriority::Default,
             stdinn,
             stdoutn,
             stderrn,
+            NonZero::new(DEFAULT_MIN_STACK_SIZE),
         )?;
 
         let (stdin, stdout, stderr) =

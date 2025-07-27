@@ -1,5 +1,5 @@
-use safa_api::raw::processes::AbiStructures;
-use safa_api::raw::{NonNullSlice, RawSliceMut};
+use safa_api::abi::process::AbiStructures;
+use safa_api::ffi::{slice::Slice, str::Str};
 use safa_api::syscalls;
 
 unsafe extern "C" {
@@ -8,14 +8,14 @@ unsafe extern "C" {
 
 unsafe fn _start_inner(
     argc: usize,
-    argv: *mut NonNullSlice<u8>,
+    argv: *mut Str,
     envc: usize,
-    envp: *mut NonNullSlice<u8>,
+    envp: *mut Slice<u8>,
     task_abi_structures: *const AbiStructures,
 ) -> ! {
     unsafe {
-        let args = RawSliceMut::from_raw_parts(argv, argc);
-        let env = RawSliceMut::from_raw_parts(envp, envc);
+        let args = Slice::from_raw_parts(argv, argc);
+        let env = Slice::from_raw_parts(envp, envc);
         safa_api::process::init::sysapi_init(args, env, *task_abi_structures);
         let results = main();
 
@@ -27,9 +27,9 @@ unsafe fn _start_inner(
 #[allow(unused)]
 pub extern "C" fn _start(
     argc: usize,
-    argv: *mut NonNullSlice<u8>,
+    argv: *mut Str,
     envc: usize,
-    envp: *mut NonNullSlice<u8>,
+    envp: *mut Slice<u8>,
     task_abi_structures: *const AbiStructures,
 ) {
     unsafe {

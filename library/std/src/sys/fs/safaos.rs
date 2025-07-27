@@ -8,9 +8,9 @@ use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, unsupported_err};
 use crate::sys_common::ignore_notfound;
 use crate::{fmt, fs};
+use safa_api::abi::fs as raw_fs;
+use safa_api::abi::fs::FSObjectType;
 use safa_api::errors::ErrorStatus;
-use safa_api::raw;
-use safa_api::raw::io::FSObjectType;
 use safa_api::syscalls;
 
 use crate::fs::TryLockError;
@@ -25,8 +25,8 @@ pub struct FileAttr {
     kind: FileType,
 }
 
-impl From<raw::io::FileAttr> for FileAttr {
-    fn from(other: raw::io::FileAttr) -> Self {
+impl From<raw_fs::FileAttr> for FileAttr {
+    fn from(other: raw_fs::FileAttr) -> Self {
         Self { size: other.size, kind: other.kind.into() }
     }
 }
@@ -40,7 +40,7 @@ pub struct ReadDir {
 }
 
 pub struct DirEntry {
-    inner: raw::io::DirEntry,
+    inner: raw_fs::DirEntry,
     full_path: PathBuf,
 }
 
@@ -49,7 +49,7 @@ impl DirEntry {
         &self.inner.name[..self.inner.name_length]
     }
 
-    fn from_raw(raw: raw::io::DirEntry, parent_path: &Path) -> Self {
+    fn from_raw(raw: raw_fs::DirEntry, parent_path: &Path) -> Self {
         let name = unsafe { OsStr::from_encoded_bytes_unchecked(&raw.name[..raw.name_length]) };
         let full_path = parent_path.join(name);
         Self { inner: raw, full_path }
@@ -78,12 +78,13 @@ pub enum FileType {
     Device,
 }
 
-impl From<raw::io::FSObjectType> for FileType {
-    fn from(value: raw::io::FSObjectType) -> Self {
+impl From<raw_fs::FSObjectType> for FileType {
+    fn from(value: raw_fs::FSObjectType) -> Self {
+        use raw_fs::FSObjectType as Raw;
         match value {
-            raw::io::FSObjectType::Directory => Self::Directory,
-            raw::io::FSObjectType::File => Self::File,
-            raw::io::FSObjectType::Device => Self::Device,
+            Raw::Directory => Self::Directory,
+            Raw::File => Self::File,
+            Raw::Device => Self::Device,
         }
     }
 }
@@ -471,7 +472,7 @@ pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
 
 pub fn stat(p: &Path) -> io::Result<FileAttr> {
     let path = path_to_str!(p);
-    let fd = FileResource::open(path, raw::io::OpenOptions::READ)?;
+    let fd = FileResource::open(path, raw_fs::OpenOptions::READ)?;
     Ok(fd.attrs()?)
 }
 

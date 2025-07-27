@@ -3,8 +3,8 @@ use core::mem::ManuallyDrop;
 
 use crate::io::{self, SeekFrom};
 use crate::sys::fs::FileAttr;
-use safa_api::raw;
-use safa_api::raw::io::OpenOptions;
+use safa_api::abi::fs as raw_fs;
+use safa_api::abi::fs::OpenOptions;
 use safa_api::{errors::ErrorStatus, syscalls};
 
 macro_rules! path_to_str {
@@ -60,11 +60,11 @@ pub(crate) struct DirIterResource(ResourceID);
 
 impl DirIterResource {
     pub(crate) fn open(path: &str) -> Result<Self, ErrorStatus> {
-        let file = FileResource::open(path, raw::io::OpenOptions::READ)?;
+        let file = FileResource::open(path, raw_fs::OpenOptions::READ)?;
         file.diriter_open()
     }
 
-    pub(crate) fn next(&mut self) -> Option<raw::io::DirEntry> {
+    pub(crate) fn next(&mut self) -> Option<raw_fs::DirEntry> {
         // should never error expect if there is no more entries it returns ErrorStatus::Generic
         let raw = syscalls::io::diriter_next(self.0).ok()?;
         if raw == unsafe { core::mem::zeroed() } { None } else { Some(raw) }
@@ -146,7 +146,7 @@ impl FileDesc {
         create: bool,
         truncate: bool,
     ) -> Result<Self, ErrorStatus> {
-        use raw::io::OpenOptions as RawOpenOptions;
+        use raw_fs::OpenOptions as RawOpenOptions;
 
         let mut options = RawOpenOptions::from_bits(0);
         if write {

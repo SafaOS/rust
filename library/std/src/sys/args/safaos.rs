@@ -14,7 +14,7 @@ impl fmt::Debug for Args {
         for i in 0..len {
             // safe because index is always in len and raw_args is initialized (otherwise len is going to be 0)
             let arg = unsafe { self.0.get_index(i).unwrap_unchecked() };
-            list.entry(&unsafe { arg.into_slice_mut() });
+            list.entry(&arg);
         }
         list.finish()
     }
@@ -23,9 +23,9 @@ impl fmt::Debug for Args {
 impl Iterator for Args {
     type Item = OsString;
     fn next(&mut self) -> Option<OsString> {
-        self.0.next().map(|arg| unsafe {
-            OsString::from_encoded_bytes_unchecked(arg.into_slice_mut().to_vec())
-        })
+        self.0
+            .next()
+            .map(|arg| unsafe { OsString::from_encoded_bytes_unchecked(arg.as_bytes().to_vec()) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

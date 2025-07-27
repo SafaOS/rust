@@ -12,7 +12,9 @@ pub const DEFAULT_MIN_STACK_SIZE: usize = 64 * 1024;
 
 impl Thread {
     // unsafe: see thread::Builder::spawn_unchecked for safety requirements
-    pub unsafe fn new(_stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
+    pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
+        let stack_size = NonZero::new(stack.max(DEFAULT_MIN_STACK_SIZE));
+
         let raw_ptr = Box::into_raw(Box::new(p));
         fn thread_start(_cid: u32, main_fn: &'static Box<dyn FnOnce()>) -> ! {
             let main_fn: Box<Box<dyn FnOnce()>> =
@@ -21,7 +23,12 @@ impl Thread {
             syscalls::thread::exit(0);
         }
 
-        let cid = syscalls::thread::spawn(thread_start, unsafe { &*raw_ptr }, None);
+        let cid = syscalls::thread::spawn(
+            thread_start,
+            unsafe { &*raw_ptr },
+            safa_api::abi::process::RawContextPriority::Default,
+            stack_size,
+        );
         match cid {
             Ok(cid) => Ok(Thread(cid)),
             Err(e) => {
