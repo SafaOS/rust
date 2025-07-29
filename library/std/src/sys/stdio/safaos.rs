@@ -36,7 +36,11 @@ impl Stdout {
 
 impl io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(syscalls::io::write(sysget_stdout(), -1, buf)?)
+        let results = syscalls::io::write(sysget_stdout(), -1, buf)?;
+        if buf.last() == Some(&b'\n') {
+            self.flush()?;
+        }
+        Ok(results)
     }
 
     fn flush(&mut self) -> io::Result<()> {
