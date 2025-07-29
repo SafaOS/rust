@@ -20,6 +20,9 @@ impl Thread {
             let main_fn: Box<Box<dyn FnOnce()>> =
                 unsafe { Box::from_raw((main_fn as *const Box<dyn FnOnce()>).cast_mut()) };
             main_fn();
+            // run all destructors
+            unsafe { crate::sys::thread_local::destructors::run() };
+            crate::rt::thread_cleanup();
             syscalls::thread::exit(0);
         }
 
