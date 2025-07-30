@@ -9,6 +9,7 @@ cfg_if::cfg_if! {
         target_os = "dragonfly",
         target_os = "fuchsia",
         target_os = "hermit",
+        target_os = "safaos",
     ))] {
         mod futex;
         pub use futex::Parker;

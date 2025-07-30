@@ -8,6 +8,7 @@ cfg_if::cfg_if! {
         target_os = "dragonfly",
         all(target_family = "wasm", target_feature = "atomics"),
         target_os = "hermit",
+        target_os = "safaos",
     ))] {
         mod futex;
         pub use futex::Mutex;
