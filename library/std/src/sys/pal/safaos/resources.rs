@@ -14,10 +14,13 @@ macro_rules! path_to_str {
 }
 pub(crate) use path_to_str;
 
+#[stable(feature = "rust1", since = "1.0.0")]
+/// Reprsents an ID over a resource
 pub type ResourceID = usize;
+const _: () = assert!(size_of::<ResourceID>() == size_of::<safa_api::syscalls::types::Ri>());
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct FileResource(ResourceID);
+pub(crate) struct FileResource(pub(crate) ResourceID);
 
 impl FileResource {
     pub(crate) fn open(path: &str, options: OpenOptions) -> Result<Self, ErrorStatus> {
@@ -92,7 +95,7 @@ impl Clone for FileResource {
 // FIXME: make seek_at a mutex?
 #[derive(Debug)]
 pub(crate) struct FileDesc {
-    fd: FileResource,
+    pub(crate) fd: FileResource,
     seek_at: UnsafeCell<isize>,
 }
 

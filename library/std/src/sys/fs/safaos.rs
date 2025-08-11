@@ -17,7 +17,7 @@ use crate::fs::TryLockError;
 use crate::sys::pal::resources::path_to_str;
 
 #[derive(Debug)]
-pub struct File(FileDesc);
+pub struct File(pub(crate) FileDesc);
 
 #[derive(Debug, Clone)]
 pub struct FileAttr {

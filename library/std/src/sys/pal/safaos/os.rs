@@ -105,13 +105,12 @@ pub fn exit(code: i32) -> ! {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn abort() -> ! {
-    exit(1)
+    exit(ErrorStatus::Panic as i32)
 }
 
-// TODO: define an ErrorStatus for panics? or just go with Generic?
 #[unsafe(no_mangle)]
 pub extern "C" fn __rust_abort() -> ! {
-    exit(1)
+    exit(ErrorStatus::Panic as i32)
 }
 
 pub fn getpid() -> u32 {
