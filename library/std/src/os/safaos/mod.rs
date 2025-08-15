@@ -10,27 +10,7 @@ use crate::{fs::File, sys_common::AsInner};
 
 #[inline(always)]
 pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
-    use crate::io::ErrorKind as IoErrorKind;
-    use ErrorStatus::*;
-
-    match err {
-        NoSuchAFileOrDirectory => IoErrorKind::NotFound,
-        AlreadyExists => IoErrorKind::AlreadyExists,
-        MissingPermissions => IoErrorKind::PermissionDenied,
-        Busy => IoErrorKind::ResourceBusy,
-        NotADirectory => IoErrorKind::NotADirectory,
-        NotAFile => IoErrorKind::IsADirectory,
-        NotADevice => IoErrorKind::Unsupported,
-        InvalidPath | InvalidPid | InvalidTid | InvalidResource | InvalidOffset | InvalidPtr
-        | StrTooLong => IoErrorKind::InvalidInput,
-        InvalidStr | Corrupted | NotExecutable => IoErrorKind::InvalidData,
-        OutOfMemory => IoErrorKind::OutOfMemory,
-        DirectoryNotEmpty => IoErrorKind::DirectoryNotEmpty,
-        OperationNotSupported | NotSupported | InvalidSyscall => IoErrorKind::Unsupported,
-        NotEnoughArguments | Generic | MMapError | Panic | Unknown => IoErrorKind::Other,
-        InvalidArgument | InvalidCommand => IoErrorKind::InvalidInput,
-        Timeout => IoErrorKind::TimedOut,
-    }
+    safa_api::err_into_io_error_kind!(err, crate::io::ErrorKind);
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
