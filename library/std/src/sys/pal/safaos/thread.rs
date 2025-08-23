@@ -30,6 +30,7 @@ impl Thread {
         #[unsafe(naked)]
         extern "C" fn thread_start(cid: u32, main_fn: &'static Box<dyn FnOnce()>) -> ! {
             unsafe {
+                #[cfg(target_arch = "x86_64")]
                 core::arch::naked_asm!(
                     "
                 and rsp, ~0xf
@@ -37,7 +38,15 @@ impl Thread {
                 push rbp
                 mov rbp, rsp
                 call thread_start_inner
-                ud2
+                "
+                );
+                #[cfg(target_arch = "aarch64")]
+                core::arch::naked_asm!(
+                    "
+                mov fp, #0
+                sub sp, sp, #16
+                stp xzr, xzr, [sp]
+                bl thread_start_inner
                 "
                 );
             }

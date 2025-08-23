@@ -15,17 +15,9 @@ unsafe extern "C" fn _start_inner(
     task_abi_structures: *const AbiStructures,
 ) -> ! {
     unsafe {
-        let rbp: usize;
-        core::arch::asm!("mov {}, rbp", out(reg) rbp);
-
         let args = Slice::from_raw_parts(argv, argc);
         let env = Slice::from_raw_parts(envp, envc);
         safa_api::process::init::sysapi_init(args, env, *task_abi_structures);
-
-        assert!(argv.is_aligned() || argv.is_null());
-        assert!(envp.is_aligned() || envp.is_null());
-        assert!(task_abi_structures.is_aligned() && !task_abi_structures.is_null());
-        assert!(rbp == 0);
 
         let results = main();
 
@@ -51,7 +43,6 @@ pub extern "C" fn _start(
             sub sp, sp, #16
             stp xzr, xzr, [sp]
             bl _start_inner
-            ud2
             "
         );
         #[cfg(target_arch = "x86_64")]
