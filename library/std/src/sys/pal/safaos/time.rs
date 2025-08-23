@@ -10,7 +10,9 @@ pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
 
 impl Instant {
     pub fn now() -> Instant {
-        panic!("time not implemented on this platform")
+        // FIXME: Instant::now() is a stub
+        let uptime_ms = safa_api::syscalls::misc::uptime();
+        Self(Duration::from_millis(uptime_ms))
     }
 
     pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
@@ -28,7 +30,8 @@ impl Instant {
 
 impl SystemTime {
     pub fn now() -> SystemTime {
-        panic!("time not implemented on this platform")
+        let uptime_ms = safa_api::syscalls::misc::uptime();
+        Self(Duration::from_millis(uptime_ms))
     }
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
