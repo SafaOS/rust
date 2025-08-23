@@ -16,7 +16,8 @@ impl Thread {
         let stack_size = NonZero::new(stack.max(DEFAULT_MIN_STACK_SIZE));
 
         let raw_ptr = Box::into_raw(Box::new(p));
-        fn thread_start(_cid: u32, main_fn: &'static Box<dyn FnOnce()>) -> ! {
+        #[unsafe(no_mangle)]
+        extern "C" fn thread_start_inner(_cid: u32, main_fn: &'static Box<dyn FnOnce()>) -> ! {
             let main_fn: Box<Box<dyn FnOnce()>> =
                 unsafe { Box::from_raw((main_fn as *const Box<dyn FnOnce()>).cast_mut()) };
             main_fn();
@@ -24,6 +25,22 @@ impl Thread {
             unsafe { crate::sys::thread_local::destructors::run() };
             crate::rt::thread_cleanup();
             syscalls::thread::exit(0);
+        }
+
+        #[unsafe(naked)]
+        extern "C" fn thread_start(cid: u32, main_fn: &'static Box<dyn FnOnce()>) -> ! {
+            unsafe {
+                core::arch::naked_asm!(
+                    "
+                and rsp, ~0xf
+                push rbp
+                push rbp
+                mov rbp, rsp
+                call thread_start_inner
+                ud2
+                "
+                );
+            }
         }
 
         let cid = syscalls::thread::spawn(
