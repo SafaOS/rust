@@ -231,6 +231,10 @@ impl File {
         self.0
     }
 
+    pub fn from_raw(fd: FileDesc) -> Self {
+        Self(fd)
+    }
+
     pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
         let append = opts.append && opts.write;
         let truncate = opts.truncate && opts.write;

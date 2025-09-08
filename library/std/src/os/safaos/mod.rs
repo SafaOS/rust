@@ -6,7 +6,11 @@ use safa_api::errors::ErrorStatus;
 #[stable(feature = "safa_api", since = "1.0.0")]
 pub use safa_api::*;
 
-use crate::{fs::File, sys_common::AsInner};
+use crate::{
+    fs::File,
+    sys::resources::FileDesc,
+    sys_common::{AsInner, FromInner},
+};
 
 #[inline(always)]
 pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
@@ -25,9 +29,27 @@ pub trait AsRawResource {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
+/// A trait to express something that can be converted from a raw resource
+pub trait FromRawResource {
+    #[stable(feature = "rust1", since = "1.0.0")]
+    /// Returns the object for this raw resource ID, can take ownership of the resource.
+    /// # Safety
+    /// resource must be valid and this may take ownership of the resource.
+    unsafe fn from_raw_resource(resource: ResourceID) -> Self;
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
 impl AsRawResource for File {
     fn as_raw_resource(&self) -> ResourceID {
         self.as_inner().0.fd.0
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl FromRawResource for File {
+    unsafe fn from_raw_resource(resource: ResourceID) -> Self {
+        let inner = crate::sys::fs::File::from_raw(FileDesc::from_raw(resource));
+        FromInner::from_inner(inner)
     }
 }
 
