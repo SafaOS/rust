@@ -1,4 +1,7 @@
 #![stable(feature = "rust1", since = "1.0.0")]
+#[stable(feature = "rust1", since = "1.0.0")]
+pub mod io;
+
 #[unstable(feature = "rustc_private", issue = "27812")]
 pub use safa_api as api;
 
@@ -50,20 +53,5 @@ impl FromRawResource for File {
     unsafe fn from_raw_resource(resource: ResourceID) -> Self {
         let inner = crate::sys::fs::File::from_raw(FileDesc::from_raw(resource));
         FromInner::from_inner(inner)
-    }
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-pub trait IoUtils {
-    #[stable(feature = "rust1", since = "1.0.0")]
-    /// Sends command `command` with argument `arg` to the resource `self`
-    fn send_command(&self, command: u16, arg: u64) -> crate::io::Result<()>;
-}
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl IoUtils for File {
-    fn send_command(&self, command: u16, arg: u64) -> crate::io::Result<()> {
-        let ri = self.as_raw_resource();
-        syscalls::io::io_command(ri, command, arg).map_err(|e| e.into())
     }
 }

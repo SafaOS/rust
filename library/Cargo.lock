@@ -320,7 +320,7 @@ dependencies = [
 [[package]]
 name = "safa-abi"
 version = "0.4.0"
-source = "git+https://github.com/SafaOS/SafaOS?branch=GUI#72525a91b4b3c13127aff04662c567555920df96"
+source = "git+https://github.com/SafaOS/SafaOS?branch=GUI#b4d02bf81d2db05cd4a06c050052f064a2926dda"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
@@ -330,7 +330,7 @@ dependencies = [
 [[package]]
 name = "safa-api"
 version = "0.4.3"
-source = "git+https://github.com/SafaOS/safa-api#4bfba2718e7cdd79347609486560c48823df3d85"
+source = "git+https://github.com/SafaOS/safa-api#5e18738e30dc8231daa504927fe037830a7f767e"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
