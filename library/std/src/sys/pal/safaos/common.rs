@@ -28,10 +28,9 @@ pub fn decode_error_kind(code: i32) -> crate::io::ErrorKind {
         return crate::io::ErrorKind::Uncategorized;
     }
 
-    match SysResult::try_from(code as u16) {
-        Ok(SysResult::Success) => unreachable!(),
-        Ok(SysResult::Error(err)) => crate::os::safaos::into_io_error_kind(err),
-        Err(_) => crate::io::ErrorKind::Uncategorized,
+    match SysResult::from_isize(code as isize).into_result() {
+        Ok(_) => unreachable!(),
+        Err(err) => crate::os::safaos::into_io_error_kind(err),
     }
 }
 

@@ -16,7 +16,7 @@ pub(crate) use path_to_str;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 /// Reprsents an ID over a resource
-pub type ResourceID = usize;
+pub type ResourceID = u32;
 const _: () = assert!(size_of::<ResourceID>() == size_of::<safa_api::syscalls::types::Ri>());
 
 #[derive(Debug, PartialEq, Eq)]
@@ -121,19 +121,19 @@ impl FileDesc {
 
     /// converts a raw resource id into a FileDesc
     /// this is unsafe because the resource id is not checked for validity
-    pub unsafe fn from_raw(ri: usize) -> Self {
+    pub unsafe fn from_raw(ri: ResourceID) -> Self {
         Self { fd: FileResource(ri), seek_at: UnsafeCell::new(0) }
     }
 
     /// duplicates a raw resource id into a FileDesc
     /// this is unsafe because the resource id is not checked for validity
     /// the returned FileDesc is a duplicate of the original with a different resource id and therefore doesn't take ownership of the resource
-    pub unsafe fn from_raw_dup(ri: usize) -> Self {
+    pub unsafe fn from_raw_dup(ri: ResourceID) -> Self {
         let fd = unsafe { ManuallyDrop::new(Self::from_raw(ri)) };
         ManuallyDrop::into_inner(fd.clone())
     }
 
-    pub(crate) fn fd(&self) -> usize {
+    pub(crate) fn fd(&self) -> ResourceID {
         self.fd.0
     }
 

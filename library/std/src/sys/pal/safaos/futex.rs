@@ -14,17 +14,22 @@ pub type SmallPrimitive = u32;
 pub fn futex_wait(futex: &Atomic<u32>, expected: u32, timeout: Option<Duration>) -> bool {
     // FIXME: Infinite timeout is just the max for now
     let timeout_duration = timeout.unwrap_or(Duration::MAX);
-    let results = safa_api::syscalls::futex::futex_wait(futex, expected, timeout_duration)
-        .expect("FATAL System error while waiting for Futex");
-    results
+    let results = safa_api::syscalls::futex::futex_wait(futex, expected, timeout_duration);
+    let timedout = results == Err(safa_api::errors::ErrorStatus::Timeout);
+    if let Err(err) = results {
+        panic!("FATAL System error while waiting for Futex: {}", err.as_str());
+    }
+    !timedout
 }
 
 #[inline]
 pub fn futex_wake(futex: &Atomic<u32>) -> bool {
-    let results = safa_api::syscalls::futex::futex_wake(futex, 1)
-        .expect("FATAL System error while waking 1 Futex")
-        > 0;
-    results
+    let results = safa_api::syscalls::futex::futex_wake(futex, 1);
+    let timedout = results == Err(safa_api::errors::ErrorStatus::Timeout);
+    if let Err(err) = results {
+        panic!("FATAL System error while waking Futex: {}", err.as_str());
+    }
+    !timedout
 }
 
 #[inline]
