@@ -25,7 +25,13 @@ cfg_if::cfg_if! {
             mod xous;
             pub use xous::*;
         }
-    } else if #[cfg(target_os = "uefi")] {
+    } else if #[cfg(target_os = "safaos")] {
+        mod connection {
+            mod safaos;
+            pub use safaos::*;
+        }
+    }
+    else if #[cfg(target_os = "uefi")] {
         mod connection {
             mod uefi;
             pub use uefi::*;
