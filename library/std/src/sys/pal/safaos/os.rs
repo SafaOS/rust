@@ -100,17 +100,21 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn exit(code: i32) -> ! {
-    syscalls::process::exit(code as usize)
+    syscalls::process::exit(code as isize as usize)
+}
+
+fn exit_error(err: ErrorStatus) -> ! {
+    exit(-(err as i32))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn abort() -> ! {
-    exit(ErrorStatus::Panic as i32)
+    exit_error(ErrorStatus::Panic)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn __rust_abort() -> ! {
-    exit(ErrorStatus::Panic as i32)
+    exit_error(ErrorStatus::Panic)
 }
 
 pub fn getpid() -> u32 {
