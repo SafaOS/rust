@@ -3,7 +3,7 @@ use safa_api::ffi::{slice::Slice, str::Str};
 use safa_api::syscalls;
 
 unsafe extern "C" {
-    fn main() -> u16;
+    fn main() -> isize;
 }
 
 #[unsafe(no_mangle)]
