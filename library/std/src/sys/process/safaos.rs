@@ -341,11 +341,11 @@ impl Into<ExitStatus> for ExitStatusError {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub struct ExitCode(usize);
+pub struct ExitCode(isize);
 
 impl ExitCode {
     pub const SUCCESS: ExitCode = ExitCode(0);
-    pub const FAILURE: ExitCode = ExitCode(1);
+    pub const FAILURE: ExitCode = ExitCode(-1);
 
     pub fn as_i32(&self) -> i32 {
         self.0 as i32
@@ -354,13 +354,19 @@ impl ExitCode {
 
 impl From<u8> for ExitCode {
     fn from(code: u8) -> Self {
-        Self(code as usize)
+        Self(-(code as usize as isize))
     }
 }
 
 impl From<usize> for ExitCode {
     fn from(code: usize) -> Self {
-        Self(code)
+        Self(code as isize)
+    }
+}
+
+impl From<isize> for ExitCode {
+    fn from(value: isize) -> Self {
+        Self(value)
     }
 }
 
