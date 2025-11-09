@@ -1,6 +1,8 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub mod io;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub mod process;
 
 #[unstable(feature = "rustc_private", issue = "27812")]
 pub use safa_api as api;
@@ -16,7 +18,10 @@ use crate::{
 };
 
 #[inline(always)]
-pub(crate) fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
+pub(crate) const fn into_io_error_kind(err: ErrorStatus) -> crate::io::ErrorKind {
+    const fn unknown_err() -> crate::io::ErrorKind {
+        crate::io::ErrorKind::Uncategorized
+    }
     safa_api::err_into_io_error_kind!(err, crate::io::ErrorKind);
 }
 

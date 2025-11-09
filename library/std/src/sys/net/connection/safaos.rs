@@ -411,33 +411,84 @@ impl fmt::Debug for UdpSocket {
     }
 }
 
-pub struct LookupHost(!);
+use safa_api::net::AddrHints;
+use safa_api::net::AddrInfo;
+use safa_api::net::LookupError;
+use safa_api::net::lookup_addr_info;
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl From<LookupError> for io::Error {
+    fn from(err: LookupError) -> io::Error {
+        match err {
+            LookupError::System(e) => e.into(),
+            LookupError::InvalidFamily => unreachable!("Invalid Family given to lookup_addr_info"),
+            LookupError::NoSuchNode | LookupError::NoSuchService => {
+                io::const_error!(io::ErrorKind::InvalidInput, "DNS couldn't resolve host name")
+            }
+            LookupError::ServerRefused => {
+                io::const_error!(io::ErrorKind::Uncategorized, "DNS Server Refused responding")
+            }
+            LookupError::NoData => {
+                io::const_error!(io::ErrorKind::Uncategorized, "DNS No Data for given host name")
+            }
+            LookupError::TemporaryFailure => {
+                io::const_error!(io::ErrorKind::HostUnreachable, "DNS Temporary Failure")
+            }
+        }
+    }
+}
+
+pub struct LookupHost {
+    current: Option<AddrInfo>,
+    port: u16,
+}
 
 impl LookupHost {
     pub fn port(&self) -> u16 {
-        self.0
+        self.port
     }
 }
 
 impl Iterator for LookupHost {
     type Item = SocketAddr;
     fn next(&mut self) -> Option<SocketAddr> {
-        self.0
+        match self.current.take() {
+            Some(mut info) => {
+                self.current = info.take_next();
+                Some(info.ip_socket_addr())
+            }
+            None => None,
+        }
     }
 }
 
 impl TryFrom<&str> for LookupHost {
     type Error = io::Error;
 
-    fn try_from(_v: &str) -> io::Result<LookupHost> {
-        unsupported()
+    fn try_from(s: &str) -> io::Result<LookupHost> {
+        macro_rules! try_opt {
+            ($e:expr, $msg:expr) => {
+                match $e {
+                    Some(r) => r,
+                    None => return Err(io::const_error!(io::ErrorKind::InvalidInput, $msg)),
+                }
+            };
+        }
+
+        // split the string by ':' and convert the second part to u16
+        let (host, port_str) = try_opt!(s.rsplit_once(':'), "invalid socket address");
+        let port: u16 = try_opt!(port_str.parse().ok(), "invalid port value");
+        (host, port).try_into()
     }
 }
 
 impl<'a> TryFrom<(&'a str, u16)> for LookupHost {
     type Error = io::Error;
 
-    fn try_from(_v: (&'a str, u16)) -> io::Result<LookupHost> {
-        unsupported()
+    fn try_from((node, service): (&'a str, u16)) -> io::Result<LookupHost> {
+        let hints = AddrHints::new(Some(SocketKind::Stream), None, 0);
+        lookup_addr_info(Some(node), None, Some(&hints))
+            .map(|info| LookupHost { current: Some(info), port: service })
+            .map_err(|e| e.into())
     }
 }

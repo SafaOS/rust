@@ -320,8 +320,7 @@ dependencies = [
 [[package]]
 name = "safa-abi"
 version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c4584430f60d16f7ad5eef28c7246bb1578b8cea3129f8dc6f7be0fbc658dee"
+source = "git+https://github.com/SafaOS/safa-abi#4b24d069ab1527685ce2a59ea90889b2a351024b"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
@@ -331,12 +330,13 @@ dependencies = [
 [[package]]
 name = "safa-api"
 version = "0.4.3"
-source = "git+https://github.com/SafaOS/safa-api#ce2e5644ca1dc7a8d987635bfc1a827238acf2dd"
+source = "git+https://github.com/SafaOS/safa-api#d5d8ca6e26a653030dc5cd25a21fa69daeeb99db"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
  "safa-abi",
+ "simpldns",
 ]
 
 [[package]]
@@ -344,6 +344,17 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "simpldns"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a029d10222caeab29cc754ba77433f50bf9fed96d6f8c8d6a413ea314e42686d"
+dependencies = [
+ "compiler_builtins",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
+]
 
 [[package]]
 name = "std"
