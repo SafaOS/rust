@@ -7,7 +7,7 @@ unsafe extern "C" {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn _start_inner(
+unsafe extern "C" fn _rust_start_inner(
     argc: usize,
     argv: *mut Str,
     envc: usize,
@@ -28,6 +28,7 @@ unsafe extern "C" fn _start_inner(
 #[unsafe(no_mangle)]
 #[allow(unused)]
 #[unsafe(naked)]
+#[linkage = "weak"]
 pub extern "C" fn _start(
     argc: usize,
     argv: *mut Str,
@@ -42,7 +43,7 @@ pub extern "C" fn _start(
             mov fp, #0
             sub sp, sp, #16
             stp xzr, xzr, [sp]
-            bl _start_inner
+            bl _rust_start_inner
             "
         );
         #[cfg(target_arch = "x86_64")]
@@ -51,7 +52,7 @@ pub extern "C" fn _start(
             and rsp, ~0xf
             push rbp
             push rbp
-            call _start_inner
+            call _rust_start_inner
             ud2
         ",
         );
