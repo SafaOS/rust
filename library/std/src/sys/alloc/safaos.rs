@@ -6,12 +6,6 @@ use crate::alloc::{GlobalAlloc, Layout, System};
 unsafe impl GlobalAlloc for System {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let results = unsafe { GLOBAL_SYSTEM_ALLOCATOR.alloc(layout) };
-        assert!(
-            (results as usize).is_multiple_of(layout.align()),
-            "SYSTEM ALLLOCATOR ALLOCATED UNALIGNED: {:?}, layout: {:?}",
-            results,
-            layout
-        );
         results
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
