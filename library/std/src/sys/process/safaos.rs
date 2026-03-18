@@ -46,9 +46,11 @@ enum StdioKind {
     Stderr,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Stdio {
     Inherit,
+    InheirtStdout,
+    InheirtStderr,
     Null,
     MakePipe,
     InheritFile(FileDesc),
@@ -63,6 +65,8 @@ impl Stdio {
                 StdioKind::Stdin => sysget_stdin(),
                 StdioKind::Stderr => sysget_stderr(),
             }),
+            Stdio::InheirtStdout => Some(sysget_stdout()),
+            Stdio::InheirtStderr => Some(sysget_stderr()),
             Stdio::Null => {
                 *self = Stdio::InheritFile(
                     FileDesc::open("dev:/null", true, true, false, false, false)
@@ -75,19 +79,11 @@ impl Stdio {
         }
     }
 
-    fn into_anon_pipe(self, kind: StdioKind) -> Option<AnonPipe> {
-        match (self, kind) {
-            (Stdio::Inherit, StdioKind::Stdout) => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysget_stdout()) }))
-            }
-            (Stdio::Inherit, StdioKind::Stderr) => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysget_stderr()) }))
-            }
-            (Stdio::Inherit, StdioKind::Stdin) => {
-                Some(AnonPipe::from_fd(unsafe { FileDesc::from_raw_dup(sysget_stdin()) }))
-            }
-            (Stdio::Null, _) => None,
-            (Stdio::InheritFile(fd), _) => Some(AnonPipe::from_fd(fd)),
+    fn into_anon_pipe(self) -> Option<AnonPipe> {
+        match self {
+            Self::Inherit | Self::InheirtStderr | Self::InheirtStdout => None,
+            Stdio::Null => None,
+            Stdio::InheritFile(fd) => Some(AnonPipe::from_fd(fd)),
             s => unimplemented!("stdio: {:?}", s),
         }
     }
@@ -150,16 +146,15 @@ impl Command {
 
     pub fn spawn(
         &mut self,
-        _default: Stdio,
+        default: Stdio,
         _needs_stdin: bool,
     ) -> io::Result<(Process, StdioPipes)> {
         use safa_api::abi::process::SpawnFlags;
-        assert_eq!(_default, Stdio::Inherit);
 
         let (mut stdin, mut stdout, mut stderr) = (
-            self.stdin.take().unwrap_or(Stdio::Inherit),
-            self.stdout.take().unwrap_or(Stdio::Inherit),
-            self.stderr.take().unwrap_or(Stdio::Inherit),
+            self.stdin.take().unwrap_or_else(|| default.clone()),
+            self.stdout.take().unwrap_or_else(|| default.clone()),
+            self.stderr.take().unwrap_or(default),
         );
 
         let (stdinn, stdoutn, stderrn) = (
@@ -190,11 +185,8 @@ impl Command {
             NonZero::new(DEFAULT_MIN_STACK_SIZE),
         )?;
 
-        let (stdin, stdout, stderr) = (
-            stdin.into_anon_pipe(StdioKind::Stdin),
-            stdout.into_anon_pipe(StdioKind::Stdout),
-            stderr.into_anon_pipe(StdioKind::Stderr),
-        );
+        let (stdin, stdout, stderr) =
+            (stdin.into_anon_pipe(), stdout.into_anon_pipe(), stderr.into_anon_pipe());
         Ok((Process(pid), StdioPipes { stdin, stdout, stderr }))
     }
 
@@ -228,13 +220,13 @@ impl From<AnonPipe> for Stdio {
 
 impl From<io::Stdout> for Stdio {
     fn from(_: io::Stdout) -> Stdio {
-        Self::Inherit
+        Self::InheirtStdout
     }
 }
 
 impl From<io::Stderr> for Stdio {
     fn from(_: io::Stderr) -> Stdio {
-        Self::Inherit
+        Self::InheirtStderr
     }
 }
 
