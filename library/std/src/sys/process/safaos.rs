@@ -182,7 +182,7 @@ impl Command {
             stdinn,
             stdoutn,
             stderrn,
-            NonZero::new(DEFAULT_MIN_STACK_SIZE),
+            None,
         )?;
 
         let (stdin, stdout, stderr) =
