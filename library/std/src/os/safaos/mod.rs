@@ -54,6 +54,27 @@ impl AsRawResource for File {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
+impl AsRawResource for crate::io::Stdout {
+    fn as_raw_resource(&self) -> ResourceID {
+        safa_api::process::stdio::sysget_stdout()
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl AsRawResource for crate::io::Stderr {
+    fn as_raw_resource(&self) -> ResourceID {
+        safa_api::process::stdio::sysget_stderr()
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl AsRawResource for crate::io::Stdin {
+    fn as_raw_resource(&self) -> ResourceID {
+        safa_api::process::stdio::sysget_stdin()
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
 impl FromRawResource for File {
     unsafe fn from_raw_resource(resource: ResourceID) -> Self {
         let inner = crate::sys::fs::File::from_raw(FileDesc::from_raw(resource));
